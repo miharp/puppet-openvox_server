@@ -26,4 +26,3 @@ The class manages nothing yet: this is the scaffold the milestones in
 ```puppet
 include openvox_server
 ```
-
