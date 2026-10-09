@@ -1,0 +1,15 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v0.2.0
+_src_path: gh:miharp/vox_module_template
+max_puppet_version: 10.0.0
+min_puppet_version: 8.0.0
+module_author: Michael Harp
+module_description: Installs and upgrades openvox-server from a Puppet run and manages
+    its certificate authority, configuration files, JVM settings and service, including
+    TLS termination behind a reverse proxy.
+module_license: Apache-2.0
+module_name: openvox_server
+module_source_url: https://github.com/miharp/puppet-openvox_server
+module_summary: 'Manages OpenVox Server: package, CA, configuration and service'
+module_version: 0.1.0
+puppet_forge_username: miharp

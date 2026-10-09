@@ -1,0 +1,15 @@
+---
+# Module-layer Hiera data — these are the default parameter values for the
+# openvox_server class.  Override per-node or per-environment in your own
+# Hiera hierarchy.
+
+openvox_server::manage_package: true
+openvox_server::package_ensure: 'present'
+openvox_server::package_name: 'openvox_server'
+
+openvox_server::manage_config: true
+
+openvox_server::manage_service: true
+openvox_server::service_ensure: 'running'
+openvox_server::service_enable: true
+openvox_server::service_name: 'openvox_server'

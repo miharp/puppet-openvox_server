@@ -1,0 +1,21 @@
+# Bundler
+.bundle/
+vendor/
+Gemfile.lock
+
+# rspec-puppet / puppetlabs_spec_helper
+spec/fixtures/
+.spec_prep/
+
+# Vagrant / Litmus
+.vagrant/
+inventory.yaml
+
+# PDK
+.pdk/
+
+# Editor artifacts
+.idea/
+.vscode/
+*.swp
+*~

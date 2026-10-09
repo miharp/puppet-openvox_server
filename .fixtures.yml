@@ -1,0 +1,6 @@
+---
+# puppet_fixtures auto-creates a self-symlink for the module under test from
+# metadata.json, so no symlinks entry is needed here.
+fixtures:
+  forge_modules:
+    stdlib: 'puppetlabs/stdlib'
