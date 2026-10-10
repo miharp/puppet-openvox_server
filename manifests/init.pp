@@ -1,14 +1,203 @@
 # @summary Manages OpenVox Server: package, CA, configuration and service
 #
-# Installs and upgrades openvox-server from a Puppet run and manages its
-# certificate authority, configuration files, JVM settings and service,
-# including TLS termination behind a reverse proxy.
+# Installs openvox-server from a collection, together with the openvox-agent
+# it requires, and keeps the service running. Assign it to the host that
+# runs your OpenVox Server; the agent on that host applies it against the
+# server it manages.
 #
-# The class manages nothing yet: this is the scaffold the milestones in
-# `documentation/plan.md` build on.
+# What a run does:
 #
-# @example Include with defaults
+# 1. Installs the collection's release package in place of other OpenVox and
+#    Puppet major versions' release packages (`manage_repo`).
+# 2. Ensures openvox-server at `package_version`, then openvox-agent at
+#    `agent_package_version` (`manage_agent`). The server package requires an
+#    agent of its own major, so the server goes first: moving it across a
+#    major moves the agent in the same package transaction, and the agent's
+#    own pin is applied after.
+# 3. Keeps the `puppetserver` service running and enabled, and restarts it
+#    when the server package changes (`manage_service`).
+#
+# Before that, it warns (and does nothing about it) when the host has less
+# memory than 1.1 times the server's heap, below which the server refuses to
+# start, and when the Java the installed server runs is not one it supports:
+# OpenVox Server 8 needs Java 17 or 21, OpenVox Server 9 needs 21 or 25.
+#
+# A host running neither openvox-server nor openvox-agent, such as a Puppet 7
+# server, has no collection to default to and takes an explicit `collection`.
+# OpenVox Server 9 is not packaged for Debian 12, which lacks the Java 21 it
+# needs; a Debian 12 host stays on `openvox8`.
+#
+# @example Standard install from the agent's collection
 #   include openvox_server
 #
-class openvox_server {
+# @example Move a server from OpenVox 8 to 9
+#   class { 'openvox_server':
+#     collection      => 'openvox9',
+#     package_version => 'latest',
+#   }
+#
+# @param collection
+#   The collection to install from, such as `openvox8` or `openvox9`. When
+#   unset, the installed server stays on the collection of the version it
+#   runs; on a host without a server, the collection of the OpenVox agent
+#   applying the catalog is used. Moving between majors takes an explicit
+#   collection.
+#
+# @param package_version
+#   `present` (install if missing, never upgrade), `latest`, or a version such
+#   as `9.0.1`. A bare version is expanded to the package version for the
+#   platform (`9.0.1-1.el9`, `9.0.1-1+ubuntu24.04`); one containing a `-` is
+#   used as it is.
+#
+# @param agent_package_version
+#   The same for openvox-agent on this host. The agent must share the
+#   server's major version.
+#
+# @param manage_repo
+#   Whether to install the collection's release package and remove other
+#   majors' release packages. Turn it off when the repository comes from
+#   somewhere else, such as a mirror configured by another module.
+#
+# @param apt_source
+#   Base URL the Debian and Ubuntu release package is downloaded from.
+#
+# @param yum_source
+#   Base URL the EL release package is downloaded from.
+#
+# @param manage_agent
+#   Whether to manage openvox-agent on this host. openvox_agent (the agent
+#   module) leaves server hosts alone, so this is the class that owns the
+#   agent package here. Turn it off when something else manages it.
+#
+# @param java_package
+#   A JRE package to install before the server. Not needed with released
+#   packages, which pull in a supported JRE; for pre-release testing where
+#   the server needs a Java the package does not yet require.
+#
+# @param manage_service
+#   Whether to manage the server service.
+#
+# @param service_name
+#   The server service. The openvox-server package keeps the `puppetserver`
+#   service name.
+#
+# @param service_ensure
+#   Whether the service should be running.
+#
+# @param service_enable
+#   Whether the service starts at boot.
+#
+class openvox_server (
+  Optional[Pattern[/\Aopenvox\d+\z/]] $collection            = undef,
+  String[1]                           $package_version       = 'present',
+  String[1]                           $agent_package_version = 'present',
+  Boolean                             $manage_repo           = true,
+  Pattern[/\Ahttps?:\/\/\S+[^\/]\z/]  $apt_source            = 'https://apt.voxpupuli.org',
+  Pattern[/\Ahttps?:\/\/\S+[^\/]\z/]  $yum_source            = 'https://yum.voxpupuli.org',
+  Boolean                             $manage_agent          = true,
+  Optional[String[1]]                 $java_package          = undef,
+  Boolean                             $manage_service        = true,
+  String[1]                           $service_name          = 'puppetserver',
+  Enum['running', 'stopped']          $service_ensure        = 'running',
+  Boolean                             $service_enable        = true,
+) {
+  $state = $facts['openvox_server'].lest || { {} }
+  $held_packages = $state['held_packages'].lest || { [] }
+
+  # Release packages are published per distribution release: debian12,
+  # ubuntu24.04, el-9.
+  $platform = $facts['os']['name'] ? {
+    'Ubuntu' => "ubuntu${facts['os']['release']['full']}",
+    'Debian' => "debian${facts['os']['release']['major']}",
+    default  => "el${facts['os']['release']['major']}",
+  }
+
+  $resolved_collection = $collection.lest || {
+    if $state['collection'] =~ NotUndef {
+      $state['collection']
+    } elsif $state['agent_package'] == 'openvox-agent' and $facts['aio_agent_version'] =~ NotUndef {
+      "openvox${facts['aio_agent_version'].split('\.')[0]}"
+    } else {
+      undef
+    }
+  }
+
+  if $resolved_collection =~ Undef {
+    fail(@("MSG"/L))
+      openvox_server: ${trusted['certname']} runs neither openvox-server nor openvox-agent, \
+      so there is no collection to install from; set collection (such as openvox9).
+      | MSG
+  }
+
+  # Debian 12 ships no Java 21, so no OpenVox Server 9 package is built for
+  # it; apt would only say the package cannot be located.
+  if $facts['os']['name'] == 'Debian' and $facts['os']['release']['major'] == '12'
+  and Integer($resolved_collection.regsubst(/\Aopenvox/, '')) >= 9 {
+    fail(@("MSG"/L))
+      openvox_server: OpenVox Server 9 is not packaged for Debian 12 (it needs Java 21, which \
+      Debian 12 does not ship); keep ${trusted['certname']} on openvox8 or move it to Debian 13.
+      | MSG
+  }
+
+  unless $held_packages.empty {
+    warning(@("MSG"/L))
+      openvox_server: ${held_packages.join(', ')} held on ${trusted['certname']} \
+      (apt-mark hold or versionlock); the package manager will refuse to change it.
+      | MSG
+  }
+
+  # OpenVox Server refuses to start when the host has less memory than 1.1
+  # times its maximum heap. The heap is -Xmx in JAVA_ARGS of the defaults
+  # file, or the packaged 2 GB before the package is installed. Without an
+  # -Xmx the JVM sizes the heap to the host, which always fits.
+  $heap_mb = $state['defaults_file'] ? {
+    Undef   => 2048,
+    default => $state['heap_mb'],
+  }
+  $total_bytes = $facts.dig('memory', 'system', 'total_bytes')
+  if $heap_mb =~ Integer and $total_bytes =~ Integer and $total_bytes * 10 < $heap_mb * 1024 * 1024 * 11 {
+    $total_mb = Integer($total_bytes / 1024 / 1024)
+    $need_mb = Integer(($heap_mb * 11 + 9) / 10)
+    warning(@("MSG"/L))
+      openvox_server: ${trusted['certname']} has ${total_mb} MB of memory, but OpenVox Server \
+      refuses to start with a ${heap_mb} MB heap on less than ${need_mb} MB (1.1 times the heap); \
+      lower -Xmx in JAVA_ARGS or use a host with more memory.
+      | MSG
+  }
+
+  # Released packages pull in a JRE the server supports and, from OpenVox
+  # Server 9, pick it through their own launcher. A host upgraded over the
+  # years can still end up with the service pointed at a Java it cannot run:
+  # 8 needs Java 17 or 21, 9 needs 21 or 25.
+  if $state['collection'] =~ NotUndef {
+    $server_major = Integer($state['collection'].regsubst(/\Aopenvox/, ''))
+    $supported_java = $server_major >= 9 ? {
+      true    => [21, 25],
+      default => [17, 21],
+    }
+    $java = $state['java']
+    if $java =~ Undef {
+      warning(@("MSG"/L))
+        openvox_server: openvox-server ${state['version']} on ${trusted['certname']} found no Java to \
+        run; it needs Java ${supported_java.join(' or ')}.
+        | MSG
+    } elsif !($java['version'] in $supported_java) {
+      warning(@("MSG"/L))
+        openvox_server: openvox-server ${state['version']} on ${trusted['certname']} runs \
+        ${java['path']} (Java ${java['version']}); it needs Java ${supported_java.join(' or ')}.
+        | MSG
+    }
+  }
+
+  if $manage_repo {
+    contain openvox_server::repo
+    Class['openvox_server::repo'] -> Class['openvox_server::install']
+  }
+
+  contain openvox_server::install
+
+  if $manage_service {
+    contain openvox_server::service
+    Class['openvox_server::install'] -> Class['openvox_server::service']
+  }
 }

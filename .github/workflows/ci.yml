@@ -18,5 +18,5 @@ jobs:
   puppet:
     name: Puppet
     uses: voxpupuli/gha-puppet/.github/workflows/beaker.yml@v4
-    with:
-      beaker_collection: openvox9
+    # Without beaker_collection the matrix covers every collection
+    # metadata.json allows: openvox8 and openvox9.
