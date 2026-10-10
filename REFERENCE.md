@@ -6,23 +6,229 @@
 
 ### Classes
 
+#### Public Classes
+
 * [`openvox_server`](#openvox_server): Manages OpenVox Server: package, CA, configuration and service
+
+#### Private Classes
+
+* `openvox_server::install`: Ensures openvox-server and the openvox-agent it requires
+* `openvox_server::repo`: Installs the collection's release package in place of other major versions'
+* `openvox_server::service`: Keeps the server service running and restarts it when the package changes
+
+### Functions
+
+* [`openvox_server::package_version`](#openvox_server--package_version): Expands a bare version to the platform's package version
 
 ## Classes
 
 ### <a name="openvox_server"></a>`openvox_server`
 
-Installs and upgrades openvox-server from a Puppet run and manages its
-certificate authority, configuration files, JVM settings and service,
-including TLS termination behind a reverse proxy.
+Installs openvox-server from a collection, together with the openvox-agent
+it requires, and keeps the service running. Assign it to the host that
+runs your OpenVox Server; the agent on that host applies it against the
+server it manages.
 
-The class manages nothing yet: this is the scaffold the milestones in
-`documentation/plan.md` build on.
+What a run does:
+
+1. Installs the collection's release package in place of other OpenVox and
+   Puppet major versions' release packages (`manage_repo`).
+2. Ensures openvox-server at `package_version`, then openvox-agent at
+   `agent_package_version` (`manage_agent`). The server package requires an
+   agent of its own major, so the server goes first: moving it across a
+   major moves the agent in the same package transaction, and the agent's
+   own pin is applied after.
+3. Keeps the `puppetserver` service running and enabled, and restarts it
+   when the server package changes (`manage_service`).
+
+Before that, it warns (and does nothing about it) when the host has less
+memory than 1.1 times the server's heap, below which the server refuses to
+start, and when the Java the installed server runs is not one it supports:
+OpenVox Server 8 needs Java 17 or 21, OpenVox Server 9 needs 21 or 25.
+
+A host running neither openvox-server nor openvox-agent, such as a Puppet 7
+server, has no collection to default to and takes an explicit `collection`.
 
 #### Examples
 
-##### Include with defaults
+##### Standard install from the agent's collection
 
 ```puppet
 include openvox_server
 ```
+
+##### Move a server from OpenVox 8 to 9
+
+```puppet
+class { 'openvox_server':
+  collection      => 'openvox9',
+  package_version => 'latest',
+}
+```
+
+#### Parameters
+
+The following parameters are available in the `openvox_server` class:
+
+* [`collection`](#-openvox_server--collection)
+* [`package_version`](#-openvox_server--package_version)
+* [`agent_package_version`](#-openvox_server--agent_package_version)
+* [`manage_repo`](#-openvox_server--manage_repo)
+* [`apt_source`](#-openvox_server--apt_source)
+* [`yum_source`](#-openvox_server--yum_source)
+* [`manage_agent`](#-openvox_server--manage_agent)
+* [`java_package`](#-openvox_server--java_package)
+* [`manage_service`](#-openvox_server--manage_service)
+* [`service_name`](#-openvox_server--service_name)
+* [`service_ensure`](#-openvox_server--service_ensure)
+* [`service_enable`](#-openvox_server--service_enable)
+
+##### <a name="-openvox_server--collection"></a>`collection`
+
+Data type: `Optional[Pattern[/\Aopenvox\d+\z/]]`
+
+The collection to install from, such as `openvox8` or `openvox9`. When
+unset, the installed server stays on the collection of the version it
+runs; on a host without a server, the collection of the OpenVox agent
+applying the catalog is used. Moving between majors takes an explicit
+collection.
+
+Default value: `undef`
+
+##### <a name="-openvox_server--package_version"></a>`package_version`
+
+Data type: `String[1]`
+
+`present` (install if missing, never upgrade), `latest`, or a version such
+as `9.0.1`. A bare version is expanded to the package version for the
+platform (`9.0.1-1.el9`, `9.0.1-1+ubuntu24.04`); one containing a `-` is
+used as it is.
+
+Default value: `'present'`
+
+##### <a name="-openvox_server--agent_package_version"></a>`agent_package_version`
+
+Data type: `String[1]`
+
+The same for openvox-agent on this host. The agent must share the
+server's major version.
+
+Default value: `'present'`
+
+##### <a name="-openvox_server--manage_repo"></a>`manage_repo`
+
+Data type: `Boolean`
+
+Whether to install the collection's release package and remove other
+majors' release packages. Turn it off when the repository comes from
+somewhere else, such as a mirror configured by another module.
+
+Default value: `true`
+
+##### <a name="-openvox_server--apt_source"></a>`apt_source`
+
+Data type: `Pattern[/\Ahttps?:\/\/\S+[^\/]\z/]`
+
+Base URL the Debian and Ubuntu release package is downloaded from.
+
+Default value: `'https://apt.voxpupuli.org'`
+
+##### <a name="-openvox_server--yum_source"></a>`yum_source`
+
+Data type: `Pattern[/\Ahttps?:\/\/\S+[^\/]\z/]`
+
+Base URL the EL release package is downloaded from.
+
+Default value: `'https://yum.voxpupuli.org'`
+
+##### <a name="-openvox_server--manage_agent"></a>`manage_agent`
+
+Data type: `Boolean`
+
+Whether to manage openvox-agent on this host. openvox_agent (the agent
+module) leaves server hosts alone, so this is the class that owns the
+agent package here. Turn it off when something else manages it.
+
+Default value: `true`
+
+##### <a name="-openvox_server--java_package"></a>`java_package`
+
+Data type: `Optional[String[1]]`
+
+A JRE package to install before the server. Not needed with released
+packages, which pull in a supported JRE; for pre-release testing where
+the server needs a Java the package does not yet require.
+
+Default value: `undef`
+
+##### <a name="-openvox_server--manage_service"></a>`manage_service`
+
+Data type: `Boolean`
+
+Whether to manage the server service.
+
+Default value: `true`
+
+##### <a name="-openvox_server--service_name"></a>`service_name`
+
+Data type: `String[1]`
+
+The server service. The openvox-server package keeps the `puppetserver`
+service name.
+
+Default value: `'puppetserver'`
+
+##### <a name="-openvox_server--service_ensure"></a>`service_ensure`
+
+Data type: `Enum['running', 'stopped']`
+
+Whether the service should be running.
+
+Default value: `'running'`
+
+##### <a name="-openvox_server--service_enable"></a>`service_enable`
+
+Data type: `Boolean`
+
+Whether the service starts at boot.
+
+Default value: `true`
+
+## Functions
+
+### <a name="openvox_server--package_version"></a>`openvox_server::package_version`
+
+Type: Puppet Language
+
+`present`, `installed`, `latest` and versions containing a `-` are returned
+as they are. A bare version such as `9.0.1` becomes `9.0.1-1+debian12` on
+Debian and Ubuntu and `9.0.1-1.el9` on EL, the way the OpenVox packages are
+versioned.
+
+#### `openvox_server::package_version(String[1] $version, String[1] $platform, String[1] $os_family)`
+
+`present`, `installed`, `latest` and versions containing a `-` are returned
+as they are. A bare version such as `9.0.1` becomes `9.0.1-1+debian12` on
+Debian and Ubuntu and `9.0.1-1.el9` on EL, the way the OpenVox packages are
+versioned.
+
+Returns: `String[1]` The package version to ensure.
+
+##### `version`
+
+Data type: `String[1]`
+
+The requested version.
+
+##### `platform`
+
+Data type: `String[1]`
+
+The distribution release the packages are built for: `debian12`,
+`ubuntu24.04`, `el9`.
+
+##### `os_family`
+
+Data type: `String[1]`
+
+The `os.family` fact.
