@@ -318,4 +318,58 @@ describe 'openvox_server' do
       end
     end
   end
+
+  context 'when moving the server from OpenVox 8 to 9' do
+    # Only from an OpenVox 8 host. Debian 12 has no OpenVox Server 9 package
+    # and the class refuses the move there; elsewhere the release package is
+    # switched and the server and agent packages move in one transaction.
+    context 'on Debian 12' do
+      before(:all) do
+        os = shell('/opt/puppetlabs/bin/facter os.name os.release.major').stdout
+        skip 'not an OpenVox 8 host on Debian 12' unless ENV.fetch('BEAKER_PUPPET_COLLECTION', 'openvox9') == 'openvox8' && os.include?('Debian') && os.match?(%r{=> "?12"?})
+      end
+
+      it 'refuses the move with a message' do
+        result = apply_manifest("class { 'openvox_server': collection => 'openvox9', package_version => 'latest' }", expect_failures: true)
+        expect(result.stderr).to match(%r{not packaged for Debian 12})
+      end
+    end
+
+    context 'elsewhere' do
+      before(:all) do
+        os = shell('/opt/puppetlabs/bin/facter os.name os.release.major').stdout
+        skip 'not an OpenVox 8 host that can move' if ENV.fetch('BEAKER_PUPPET_COLLECTION', 'openvox9') != 'openvox8' || (os.include?('Debian') && os.match?(%r{=> "?12"?}))
+        # What the move must leave alone, kept on the host for comparison.
+        shell('cp -p /etc/puppetlabs/puppet/puppet.conf /root/puppet.conf.before')
+        shell('cat /etc/default/puppetserver /etc/sysconfig/puppetserver 2>/dev/null | grep ^JAVA_ARGS= > /root/java_args.before')
+      end
+
+      it_behaves_like 'an idempotent resource' do
+        let(:manifest) { "class { 'openvox_server': collection => 'openvox9', package_version => 'latest', agent_package_version => 'latest' }" }
+      end
+
+      describe 'afterwards' do
+        it 'runs OpenVox Server 9 with the OpenVox 9 agent' do
+          expect(shell('/opt/puppetlabs/bin/puppetserver --version').stdout).to match(%r{version: 9\.})
+          expect(shell('/opt/puppetlabs/bin/puppet --version').stdout).to match(%r{\A9\.})
+          expect(package('openvox9-release')).to be_installed
+          expect(package('openvox8-release')).not_to be_installed
+        end
+
+        it { expect(service('puppetserver')).to be_running }
+
+        it 'keeps JAVA_ARGS and puppet.conf as they were' do
+          # cmp and diff are not on every image; md5sum is.
+          java_args = shell('cat /etc/default/puppetserver /etc/sysconfig/puppetserver 2>/dev/null | grep ^JAVA_ARGS= | md5sum; md5sum < /root/java_args.before').stdout.split
+          expect(java_args[0]).to eq(java_args[2])
+          puppet_conf = shell('md5sum < /etc/puppetlabs/puppet/puppet.conf; md5sum < /root/puppet.conf.before').stdout.split
+          expect(puppet_conf[0]).to eq(puppet_conf[2])
+        end
+
+        it 'still serves the agent on the host a catalog' do
+          shell("/opt/puppetlabs/bin/puppet agent --test --server #{certname}", acceptable_exit_codes: [0, 2])
+        end
+      end
+    end
+  end
 end
