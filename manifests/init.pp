@@ -14,8 +14,15 @@
 #    agent of its own major, so the server goes first: moving it across a
 #    major moves the agent in the same package transaction, and the agent's
 #    own pin is applied after.
-# 3. Keeps the `puppetserver` service running and enabled, and restarts it
-#    when the server package changes (`manage_service`).
+# 3. Sets the `[server]` settings in `puppet.conf` and the renewal settings
+#    in `ca.conf` that are given, and leaves the rest of both files alone.
+# 4. Keeps the CA service enabled in `services.d/ca.cfg`, and before the
+#    service ever starts, when no CA exists yet, runs `puppetserver ca setup`
+#    so the CA is a root plus a 15-year intermediate rather than the single
+#    self-signed certificate the service makes for itself on first start
+#    (`manage_ca`).
+# 5. Keeps the `puppetserver` service running and enabled, and restarts it
+#    when the server package or its configuration changes (`manage_service`).
 #
 # Before that, it warns (and does nothing about it) when the host has less
 # memory than 1.1 times the server's heap, below which the server refuses to
@@ -34,6 +41,14 @@
 #   class { 'openvox_server':
 #     collection      => 'openvox9',
 #     package_version => 'latest',
+#   }
+#
+# @example A CA with a name of its own, renewing agent certificates
+#   class { 'openvox_server':
+#     ca_name               => 'Example CA',
+#     dns_alt_names         => ['puppet', 'puppet.example.com'],
+#     allow_auto_renewal    => true,
+#     auto_renewal_cert_ttl => '90d',
 #   }
 #
 # @param collection
@@ -74,6 +89,44 @@
 #   packages, which pull in a supported JRE; for pre-release testing where
 #   the server needs a Java the package does not yet require.
 #
+# @param manage_ca
+#   Whether to keep the CA service enabled in `services.d/ca.cfg` and to set
+#   the CA up with `puppetserver ca setup` before the first start. An existing
+#   CA is never touched.
+#
+# @param ca_name
+#   The common name of the intermediate signing certificate `puppetserver ca
+#   setup` creates, in place of `Puppet CA: <certname>`. Only used when the
+#   CA is created.
+#
+# @param subject_alt_names
+#   Subject alternative names for the server's own certificate when
+#   `puppetserver ca setup` creates it. When unset, `dns_alt_names` applies.
+#   Only used when the CA is created.
+#
+# @param allow_auto_renewal
+#   `certificate-authority.allow-auto-renewal` in `ca.conf`: whether the CA
+#   renews agent certificates that ask. When unset, the file's value is left
+#   as it is.
+#
+# @param auto_renewal_cert_ttl
+#   `certificate-authority.auto-renewal-cert-ttl` in `ca.conf`, the lifetime
+#   of renewed certificates, such as `60d`. When unset, left as it is.
+#
+# @param dns_alt_names
+#   `dns_alt_names` in the `[server]` section of `puppet.conf`: the names
+#   the server's certificate is valid for when the server requests one. When
+#   unset, left as it is.
+#
+# @param autosign
+#   `autosign` in `[server]`: `true` to sign every request, `false` to sign
+#   none, or the path of an autosign configuration file or script. When
+#   unset, left as it is.
+#
+# @param ca_server
+#   `ca_server` in `[server]`: the CA this server sends certificate requests
+#   to, for a compiler. When unset, left as it is.
+#
 # @param manage_service
 #   Whether to manage the server service.
 #
@@ -96,6 +149,14 @@ class openvox_server (
   Pattern[/\Ahttps?:\/\/\S+[^\/]\z/]  $yum_source            = 'https://yum.voxpupuli.org',
   Boolean                             $manage_agent          = true,
   Optional[String[1]]                 $java_package          = undef,
+  Boolean                             $manage_ca             = true,
+  Optional[Pattern[/\A[^'"]+\z/]]     $ca_name               = undef,
+  Optional[Array[String[1]]]          $subject_alt_names     = undef,
+  Optional[Boolean]                   $allow_auto_renewal    = undef,
+  Optional[Pattern[/\A\d+[smhdy]\z/]] $auto_renewal_cert_ttl = undef,
+  Optional[Array[String[1]]]          $dns_alt_names         = undef,
+  Optional[Variant[Boolean, Pattern[/\A\//]]] $autosign     = undef,
+  Optional[String[1]]                 $ca_server             = undef,
   Boolean                             $manage_service        = true,
   String[1]                           $service_name          = 'puppetserver',
   Enum['running', 'stopped']          $service_ensure        = 'running',
@@ -195,9 +256,19 @@ class openvox_server (
   }
 
   contain openvox_server::install
+  contain openvox_server::config
+  Class['openvox_server::install'] -> Class['openvox_server::config']
+
+  if $manage_ca {
+    contain openvox_server::ca
+    Class['openvox_server::config'] -> Class['openvox_server::ca']
+  }
 
   if $manage_service {
     contain openvox_server::service
-    Class['openvox_server::install'] -> Class['openvox_server::service']
+    Class['openvox_server::config'] ~> Class['openvox_server::service']
+    if $manage_ca {
+      Class['openvox_server::ca'] ~> Class['openvox_server::service']
+    }
   }
 }

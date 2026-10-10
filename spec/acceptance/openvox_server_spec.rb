@@ -42,6 +42,18 @@ describe 'openvox_server' do
         shell("/opt/puppetlabs/bin/puppet agent --test --server #{certname}", acceptable_exit_codes: [0, 2])
       end
 
+      it 'sets the CA up as a root plus an intermediate before the first start' do
+        # ca setup makes a chain of two certificates; the service's own
+        # first-start CA is a single self-signed one.
+        expect(shell('grep -c "BEGIN CERTIFICATE" /etc/puppetlabs/puppetserver/ca/ca_crt.pem').stdout.strip).to eq('2')
+        # ca setup names the CA after the host's fqdn, which keeps its case; certname is lowercased.
+        expect(shell('openssl x509 -in /etc/puppetlabs/puppetserver/ca/ca_crt.pem -noout -subject').stdout).to match(%r{Puppet CA: #{Regexp.escape(certname)}}i)
+      end
+
+      it 'keeps the CA service enabled' do
+        expect(file('/etc/puppetlabs/puppetserver/services.d/ca.cfg').content).to match(%r{^puppetlabs.services.ca.certificate-authority-service/certificate-authority-service$})
+      end
+
       it 'reports the server in the openvox_server fact' do
         fact = JSON.parse(shell('/opt/puppetlabs/bin/puppet facts show openvox_server --render-as json').stdout)['openvox_server']
         expect(fact).to include(
@@ -53,6 +65,41 @@ describe 'openvox_server' do
         )
         expect(fact['java']).to include('version')
         expect(fact['heap_mb']).to be_a(Integer)
+      end
+    end
+  end
+
+  context 'with renewal and [server] settings' do
+    it_behaves_like 'an idempotent resource' do
+      let(:manifest) do
+        <<~PUPPET
+          class { 'openvox_server':
+            allow_auto_renewal    => true,
+            auto_renewal_cert_ttl => '90d',
+            dns_alt_names         => ['puppet', 'puppet.example.com'],
+            autosign              => true,
+          }
+        PUPPET
+      end
+    end
+
+    describe 'afterwards' do
+      it { expect(service('puppetserver')).to be_running }
+
+      it 'sets the renewal settings and keeps the rest of ca.conf' do
+        content = file('/etc/puppetlabs/puppetserver/conf.d/ca.conf').content
+        expect(content).to match(%r{allow-auto-renewal\s*[:=]\s*true})
+        expect(content).to match(%r{auto-renewal-cert-ttl\s*[:=]\s*"?90d"?})
+        expect(content).to match(%r{allow-subject-alt-names})
+      end
+
+      it 'sets the [server] settings' do
+        expect(shell('/opt/puppetlabs/bin/puppet config print --section server dns_alt_names autosign').stdout)
+          .to match(%r{dns_alt_names = puppet,puppet.example.com}).and match(%r{autosign = true})
+      end
+
+      it 'still serves the agent on the host a catalog' do
+        shell("/opt/puppetlabs/bin/puppet agent --test --server #{certname}", acceptable_exit_codes: [0, 2])
       end
     end
   end

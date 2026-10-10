@@ -35,8 +35,20 @@ include openvox_server
    crosses a major alone: the server goes first, the package manager moves
    the agent with it in the same transaction, and the agent's own pin applies
    after.
-3. **Keeps the service running** and enabled, and restarts it when the server
-   package changes.
+3. **Sets the settings it is given** and nothing else: `dns_alt_names`,
+   `autosign` and `ca_server` in the `[server]` section of `puppet.conf`,
+   and `allow-auto-renewal` and `auto-renewal-cert-ttl` in `ca.conf`. A
+   setting left unset is left as it is, and the rest of each file is never
+   touched.
+4. **Sets the CA up before the first start.** Keeps the CA service enabled in
+   `services.d/ca.cfg`, and when no CA exists yet runs `puppetserver ca
+   setup`, so the CA is a root certificate plus an intermediate signing
+   certificate with a 15-year lifetime, the way the PE installer makes it.
+   Left to its first start, the service makes a single self-signed CA
+   certificate that expires with `ca_ttl`, five years by default. An
+   existing CA is never touched.
+5. **Keeps the service running** and enabled, and restarts it when the server
+   package or its configuration changes.
 
 Before that it warns, and changes nothing, when a package is held by
 `apt-mark hold` or `versionlock`, when the host has less memory than 1.1
@@ -73,6 +85,20 @@ class { 'openvox_server':
 }
 ```
 
+Name the CA, give the server's certificate alternative names, and let the
+CA renew agent certificates. `ca_name` and `subject_alt_names` only apply
+when the CA is created; `dns_alt_names` is also what `puppetserver ca setup`
+uses when `subject_alt_names` is unset:
+
+```puppet
+class { 'openvox_server':
+  ca_name               => 'Example CA',
+  dns_alt_names         => ['puppet', 'puppet.example.com'],
+  allow_auto_renewal    => true,
+  auto_renewal_cert_ttl => '90d',
+}
+```
+
 Use a mirror of the Vox Pupuli repositories with `apt_source` and
 `yum_source`, or set `manage_repo => false` when another module manages the
 repository. Set `manage_agent => false` when something else manages
@@ -95,8 +121,13 @@ for every parameter.
   [ovadm](https://forge.puppet.com/modules/miharp/ovadm).
 - **Holds.** A hold or versionlock on the server or agent package is
   reported, not removed.
-- **Server configuration.** `puppet.conf`, `conf.d`, the CA and the JVM
-  settings are not managed yet (see the plan).
+- **An existing CA.** `puppetserver ca setup` only runs when there is no
+  `ca_crt.pem`, so a CA the service made for itself, or one made by hand,
+  stays. Rebuilding a CA is a migration, not a Puppet run.
+- **Everything else in `puppet.conf` and `conf.d`.** Only the settings
+  listed above are managed, and each only when given. `webserver.conf`,
+  the JVM settings, `auth.conf` rules and the rest are not managed yet (see
+  the plan).
 
 ## Facts
 
@@ -125,6 +156,8 @@ The module ships one structured fact, `openvox_server`:
   `openvox9` there with a message saying so.
 - Requires OpenVox 8 or 9 on the server compiling the catalog, which is the
   host it manages.
+- Depends on puppetlabs/hocon and puppetlabs/inifile (which brings
+  puppetlabs/stdlib) for editing `ca.conf` and `puppet.conf` in place.
 
 ## Development
 

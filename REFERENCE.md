@@ -12,6 +12,8 @@
 
 #### Private Classes
 
+* `openvox_server::ca`: Keeps the CA service enabled and sets the CA up before the first start
+* `openvox_server::config`: Sets the puppet.conf [server] and ca.conf settings that are given
 * `openvox_server::install`: Ensures openvox-server and the openvox-agent it requires
 * `openvox_server::repo`: Installs the collection's release package in place of other major versions'
 * `openvox_server::service`: Keeps the server service running and restarts it when the package changes
@@ -38,8 +40,15 @@ What a run does:
    agent of its own major, so the server goes first: moving it across a
    major moves the agent in the same package transaction, and the agent's
    own pin is applied after.
-3. Keeps the `puppetserver` service running and enabled, and restarts it
-   when the server package changes (`manage_service`).
+3. Sets the `[server]` settings in `puppet.conf` and the renewal settings
+   in `ca.conf` that are given, and leaves the rest of both files alone.
+4. Keeps the CA service enabled in `services.d/ca.cfg`, and before the
+   service ever starts, when no CA exists yet, runs `puppetserver ca setup`
+   so the CA is a root plus a 15-year intermediate rather than the single
+   self-signed certificate the service makes for itself on first start
+   (`manage_ca`).
+5. Keeps the `puppetserver` service running and enabled, and restarts it
+   when the server package or its configuration changes (`manage_service`).
 
 Before that, it warns (and does nothing about it) when the host has less
 memory than 1.1 times the server's heap, below which the server refuses to
@@ -68,6 +77,17 @@ class { 'openvox_server':
 }
 ```
 
+##### A CA with a name of its own, renewing agent certificates
+
+```puppet
+class { 'openvox_server':
+  ca_name               => 'Example CA',
+  dns_alt_names         => ['puppet', 'puppet.example.com'],
+  allow_auto_renewal    => true,
+  auto_renewal_cert_ttl => '90d',
+}
+```
+
 #### Parameters
 
 The following parameters are available in the `openvox_server` class:
@@ -80,6 +100,14 @@ The following parameters are available in the `openvox_server` class:
 * [`yum_source`](#-openvox_server--yum_source)
 * [`manage_agent`](#-openvox_server--manage_agent)
 * [`java_package`](#-openvox_server--java_package)
+* [`manage_ca`](#-openvox_server--manage_ca)
+* [`ca_name`](#-openvox_server--ca_name)
+* [`subject_alt_names`](#-openvox_server--subject_alt_names)
+* [`allow_auto_renewal`](#-openvox_server--allow_auto_renewal)
+* [`auto_renewal_cert_ttl`](#-openvox_server--auto_renewal_cert_ttl)
+* [`dns_alt_names`](#-openvox_server--dns_alt_names)
+* [`autosign`](#-openvox_server--autosign)
+* [`ca_server`](#-openvox_server--ca_server)
 * [`manage_service`](#-openvox_server--manage_service)
 * [`service_name`](#-openvox_server--service_name)
 * [`service_ensure`](#-openvox_server--service_ensure)
@@ -160,6 +188,84 @@ Data type: `Optional[String[1]]`
 A JRE package to install before the server. Not needed with released
 packages, which pull in a supported JRE; for pre-release testing where
 the server needs a Java the package does not yet require.
+
+Default value: `undef`
+
+##### <a name="-openvox_server--manage_ca"></a>`manage_ca`
+
+Data type: `Boolean`
+
+Whether to keep the CA service enabled in `services.d/ca.cfg` and to set
+the CA up with `puppetserver ca setup` before the first start. An existing
+CA is never touched.
+
+Default value: `true`
+
+##### <a name="-openvox_server--ca_name"></a>`ca_name`
+
+Data type: `Optional[Pattern[/\A[^'"]+\z/]]`
+
+The common name of the intermediate signing certificate `puppetserver ca
+setup` creates, in place of `Puppet CA: <certname>`. Only used when the
+CA is created.
+
+Default value: `undef`
+
+##### <a name="-openvox_server--subject_alt_names"></a>`subject_alt_names`
+
+Data type: `Optional[Array[String[1]]]`
+
+Subject alternative names for the server's own certificate when
+`puppetserver ca setup` creates it. When unset, `dns_alt_names` applies.
+Only used when the CA is created.
+
+Default value: `undef`
+
+##### <a name="-openvox_server--allow_auto_renewal"></a>`allow_auto_renewal`
+
+Data type: `Optional[Boolean]`
+
+`certificate-authority.allow-auto-renewal` in `ca.conf`: whether the CA
+renews agent certificates that ask. When unset, the file's value is left
+as it is.
+
+Default value: `undef`
+
+##### <a name="-openvox_server--auto_renewal_cert_ttl"></a>`auto_renewal_cert_ttl`
+
+Data type: `Optional[Pattern[/\A\d+[smhdy]\z/]]`
+
+`certificate-authority.auto-renewal-cert-ttl` in `ca.conf`, the lifetime
+of renewed certificates, such as `60d`. When unset, left as it is.
+
+Default value: `undef`
+
+##### <a name="-openvox_server--dns_alt_names"></a>`dns_alt_names`
+
+Data type: `Optional[Array[String[1]]]`
+
+`dns_alt_names` in the `[server]` section of `puppet.conf`: the names
+the server's certificate is valid for when the server requests one. When
+unset, left as it is.
+
+Default value: `undef`
+
+##### <a name="-openvox_server--autosign"></a>`autosign`
+
+Data type: `Optional[Variant[Boolean, Pattern[/\A\//]]]`
+
+`autosign` in `[server]`: `true` to sign every request, `false` to sign
+none, or the path of an autosign configuration file or script. When
+unset, left as it is.
+
+Default value: `undef`
+
+##### <a name="-openvox_server--ca_server"></a>`ca_server`
+
+Data type: `Optional[String[1]]`
+
+`ca_server` in `[server]`: the CA this server sends certificate requests
+to, for a compiler. When unset, left as it is.
 
 Default value: `undef`
 
