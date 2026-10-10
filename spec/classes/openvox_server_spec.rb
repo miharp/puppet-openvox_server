@@ -31,8 +31,8 @@ describe 'openvox_server' do
         it { is_expected.to contain_class('openvox_server::repo').that_comes_before('Class[openvox_server::install]') }
         it { is_expected.to contain_class('openvox_server::config').that_requires('Class[openvox_server::install]') }
         it { is_expected.to contain_class('openvox_server::ca').that_requires('Class[openvox_server::config]') }
-        it { is_expected.to contain_class('openvox_server::service').that_subscribes_to('Class[openvox_server::config]') }
-        it { is_expected.to contain_class('openvox_server::service').that_subscribes_to('Class[openvox_server::ca]') }
+        it { is_expected.to contain_class('openvox_server::service').that_requires('Class[openvox_server::config]') }
+        it { is_expected.to contain_class('openvox_server::service').that_requires('Class[openvox_server::ca]') }
         it { is_expected.not_to contain_ini_setting(%r{openvox_server puppet.conf}) }
         it { is_expected.not_to contain_hocon_setting(%r{openvox_server ca.conf}) }
 
@@ -42,6 +42,25 @@ describe 'openvox_server' do
             .with_content(%r{^puppetlabs.services.ca.certificate-authority-service/certificate-authority-service$})
             .with_content(%r{^puppetlabs.trapperkeeper.services.watcher.filesystem-watch-service/filesystem-watch-service$})
             .without_content(%r{^puppetlabs.services.ca.certificate-authority-disabled-service})
+            .that_notifies('Service[puppetserver]')
+        end
+
+        it do
+          is_expected.to contain_file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf')
+            .with_ensure('file')
+            .with_content(%r{^webserver: \{$})
+            .with_content(%r{^    access-log-config: /etc/puppetlabs/puppetserver/request-logging.xml$})
+            .with_content(%r{^    client-auth: want$})
+            .with_content(%r{^    ssl-host: 0.0.0.0$})
+            .with_content(%r{^    ssl-port: 8140$})
+            .that_notifies('Service[puppetserver]')
+        end
+
+        it do
+          is_expected.to contain_exec('openvox_server reload puppetserver')
+            .with_command('systemctl reload puppetserver.service || systemctl restart puppetserver.service')
+            .with_refreshonly(true)
+            .that_requires('Service[puppetserver]')
         end
 
         it do
@@ -315,7 +334,7 @@ describe 'openvox_server' do
             .with_setting('certificate-authority.allow-auto-renewal')
             .with_value(true)
             .with_type('boolean')
-            .that_notifies('Class[openvox_server::service]')
+            .that_notifies('Exec[openvox_server reload puppetserver]')
         end
 
         it do
@@ -351,7 +370,7 @@ describe 'openvox_server' do
             .with_section('server')
             .with_setting('dns_alt_names')
             .with_value('puppet,puppet.example.com')
-            .that_notifies('Class[openvox_server::service]')
+            .that_notifies('Exec[openvox_server reload puppetserver]')
         end
 
         it { is_expected.to contain_ini_setting('openvox_server puppet.conf server autosign').with_section('server').with_value('true') }
@@ -378,17 +397,64 @@ describe 'openvox_server' do
         it { is_expected.to compile.and_raise_error(%r{autosign}) }
       end
 
+      context 'with webserver settings' do
+        let(:params) do
+          {
+            ssl_host: '10.0.0.1',
+            ssl_port: 8141,
+            client_auth: 'need',
+            access_log_config: '/etc/puppetlabs/puppetserver/my-logging.xml',
+            webserver_extra_settings: { 'ssl-protocols' => ['TLSv1.3'], 'idle-timeout-milliseconds' => 60_000, 'shutdown-timeout-seconds' => 30 },
+          }
+        end
+
+        it do
+          is_expected.to contain_file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf')
+            .with_content(%r{^    access-log-config: /etc/puppetlabs/puppetserver/my-logging.xml$})
+            .with_content(%r{^    client-auth: need$})
+            .with_content(%r{^    ssl-host: 10.0.0.1$})
+            .with_content(%r{^    ssl-port: 8141$})
+            .with_content(%r{^    idle-timeout-milliseconds: 60000$})
+            .with_content(%r{^    shutdown-timeout-seconds: 30$})
+            .with_content(%r{^    ssl-protocols: \["TLSv1.3"\]$})
+        end
+      end
+
+      context 'with a relative access log config' do
+        let(:params) { { access_log_config: 'request-logging.xml' } }
+
+        it { is_expected.to compile.and_raise_error(%r{access_log_config}) }
+      end
+
+      context 'with an owned webserver setting among the extra ones' do
+        let(:params) { { webserver_extra_settings: { 'ssl-port' => 8141 } } }
+
+        it { is_expected.to compile.and_raise_error(%r{webserver_extra_settings cannot set ssl-port}) }
+      end
+
+      context 'with manage_webserver false' do
+        let(:params) { { manage_webserver: false } }
+
+        it { is_expected.to compile.with_all_deps }
+        it { is_expected.not_to contain_file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf') }
+      end
+
       context 'with manage_service false' do
-        let(:params) { { manage_service: false } }
+        let(:params) { { manage_service: false, allow_auto_renewal: true } }
 
         it { is_expected.to compile.with_all_deps }
         it { is_expected.not_to contain_service('puppetserver') }
+        it { is_expected.not_to contain_exec('openvox_server reload puppetserver') }
+        it { is_expected.to contain_file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf').with_notify(nil) }
+        it { is_expected.to contain_hocon_setting('openvox_server ca.conf allow-auto-renewal').with_notify(nil) }
       end
 
       context 'with the service stopped and disabled' do
-        let(:params) { { service_ensure: 'stopped', service_enable: false } }
+        let(:params) { { service_ensure: 'stopped', service_enable: false, allow_auto_renewal: true } }
 
         it { is_expected.to contain_service('puppetserver').with_ensure('stopped').with_enable(false) }
+        it { is_expected.not_to contain_exec('openvox_server reload puppetserver') }
+        it { is_expected.to contain_hocon_setting('openvox_server ca.conf allow-auto-renewal').with_notify(nil) }
       end
 
       context 'with too little memory for the heap' do

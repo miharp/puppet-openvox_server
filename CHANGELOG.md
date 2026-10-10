@@ -29,6 +29,13 @@ Notable changes to openvox_server are recorded here. The format follows
   `autosign` and `ca_server` in the `[server]` section of `puppet.conf`,
   each only when given and without disturbing the rest of the file, through
   puppetlabs/hocon and puppetlabs/inifile, the module's two dependencies.
+- `webserver.conf` and the service (R11, R15): `webserver.conf` is owned
+  whole, with `ssl_host`, `ssl_port`, `client_auth`, `access_log_config` and
+  `webserver_extra_settings` for any further `webserver` setting. The
+  service is restarted when the package, `webserver.conf` or
+  `services.d/ca.cfg` changes, and reloaded, keeping the JVM, when
+  `puppet.conf` or `ca.conf` changes, falling back to a restart where the
+  unit cannot be reloaded.
 - The `openvox_server` fact: server package and version, collection, agent
   package, release packages, held packages, the Java the service runs, the
   defaults file and its heap, and whether the CA service and TLS termination

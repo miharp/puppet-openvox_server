@@ -14,15 +14,21 @@
 #    agent of its own major, so the server goes first: moving it across a
 #    major moves the agent in the same package transaction, and the agent's
 #    own pin is applied after.
-# 3. Sets the `[server]` settings in `puppet.conf` and the renewal settings
+# 3. Owns `webserver.conf`: the address and port the server listens on,
+#    whether it asks clients for a certificate, the access log configuration,
+#    and any further `webserver` settings given (`manage_webserver`).
+# 4. Sets the `[server]` settings in `puppet.conf` and the renewal settings
 #    in `ca.conf` that are given, and leaves the rest of both files alone.
-# 4. Keeps the CA service enabled in `services.d/ca.cfg`, and before the
+# 5. Keeps the CA service enabled in `services.d/ca.cfg`, and before the
 #    service ever starts, when no CA exists yet, runs `puppetserver ca setup`
 #    so the CA is a root plus a 15-year intermediate rather than the single
 #    self-signed certificate the service makes for itself on first start
 #    (`manage_ca`).
-# 5. Keeps the `puppetserver` service running and enabled, and restarts it
-#    when the server package or its configuration changes (`manage_service`).
+# 6. Keeps the `puppetserver` service running and enabled. The service is
+#    restarted when the package, `webserver.conf` or `services.d/ca.cfg`
+#    changes, and reloaded, which keeps the JVM and takes a few seconds,
+#    when `puppet.conf` or `ca.conf` changes (`manage_service`). A reload
+#    falls back to a restart where the service cannot be reloaded.
 #
 # Before that, it warns (and does nothing about it) when the host has less
 # memory than 1.1 times the server's heap, below which the server refuses to
@@ -89,6 +95,33 @@
 #   packages, which pull in a supported JRE; for pre-release testing where
 #   the server needs a Java the package does not yet require.
 #
+# @param manage_webserver
+#   Whether to own `webserver.conf`. Turn it off to manage the file some
+#   other way; `ssl_host`, `ssl_port`, `client_auth`, `access_log_config`
+#   and `webserver_extra_settings` then do nothing.
+#
+# @param ssl_host
+#   The address the server listens on, `webserver.ssl-host`.
+#
+# @param ssl_port
+#   The port the server listens on, `webserver.ssl-port`.
+#
+# @param client_auth
+#   `webserver.client-auth`: whether a connecting client is asked for a
+#   certificate (`want`, the default), must present one (`need`), or is not
+#   asked (`none`). Agents authenticate with their certificate, so `none`
+#   only makes sense behind a proxy that does.
+#
+# @param access_log_config
+#   `webserver.access-log-config`, the logback configuration of the request
+#   log; the package ships one.
+#
+# @param webserver_extra_settings
+#   Further `webserver` settings, by their HOCON name, such as
+#   `idle-timeout-milliseconds` or `ssl-protocols`. Strings are quoted,
+#   numbers and booleans are bare, arrays are lists. The settings the
+#   parameters above own cannot be given here.
+#
 # @param manage_ca
 #   Whether to keep the CA service enabled in `services.d/ca.cfg` and to set
 #   the CA up with `puppetserver ca setup` before the first start. An existing
@@ -149,6 +182,12 @@ class openvox_server (
   Pattern[/\Ahttps?:\/\/\S+[^\/]\z/]  $yum_source            = 'https://yum.voxpupuli.org',
   Boolean                             $manage_agent          = true,
   Optional[String[1]]                 $java_package          = undef,
+  Boolean                             $manage_webserver      = true,
+  String[1]                           $ssl_host              = '0.0.0.0',
+  Integer[1, 65535]                   $ssl_port              = 8140,
+  Enum['want', 'need', 'none']        $client_auth           = 'want',
+  Pattern[/\A\//]                     $access_log_config     = '/etc/puppetlabs/puppetserver/request-logging.xml',
+  Hash[String[1], Variant[String, Numeric, Boolean, Array[Variant[String, Numeric, Boolean]]]] $webserver_extra_settings = {},
   Boolean                             $manage_ca             = true,
   Optional[Pattern[/\A[^'"]+\z/]]     $ca_name               = undef,
   Optional[Array[String[1]]]          $subject_alt_names     = undef,
@@ -181,6 +220,12 @@ class openvox_server (
     } else {
       undef
     }
+  }
+
+  $owned_webserver_settings = ['ssl-host', 'ssl-port', 'client-auth', 'access-log-config']
+  $clashing = $webserver_extra_settings.keys.filter |$setting| { $setting in $owned_webserver_settings }
+  unless $clashing.empty {
+    fail("openvox_server: webserver_extra_settings cannot set ${clashing.join(', ')}; use the parameters for them.")
   }
 
   if $resolved_collection =~ Undef {
@@ -264,11 +309,12 @@ class openvox_server (
     Class['openvox_server::config'] -> Class['openvox_server::ca']
   }
 
+  # Configuration resources notify the service, or its reload, themselves.
   if $manage_service {
     contain openvox_server::service
-    Class['openvox_server::config'] ~> Class['openvox_server::service']
+    Class['openvox_server::config'] -> Class['openvox_server::service']
     if $manage_ca {
-      Class['openvox_server::ca'] ~> Class['openvox_server::service']
+      Class['openvox_server::ca'] -> Class['openvox_server::service']
     }
   }
 }

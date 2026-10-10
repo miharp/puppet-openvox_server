@@ -35,20 +35,28 @@ include openvox_server
    crosses a major alone: the server goes first, the package manager moves
    the agent with it in the same transaction, and the agent's own pin applies
    after.
-3. **Sets the settings it is given** and nothing else: `dns_alt_names`,
+3. **Owns `webserver.conf`.** The address and port the server listens on,
+   whether it asks clients for a certificate, the request log configuration,
+   and any further `webserver` setting given through
+   `webserver_extra_settings`. The file is written whole, so a setting not
+   given through the class is not kept.
+4. **Sets the settings it is given** and nothing else: `dns_alt_names`,
    `autosign` and `ca_server` in the `[server]` section of `puppet.conf`,
    and `allow-auto-renewal` and `auto-renewal-cert-ttl` in `ca.conf`. A
    setting left unset is left as it is, and the rest of each file is never
    touched.
-4. **Sets the CA up before the first start.** Keeps the CA service enabled in
+5. **Sets the CA up before the first start.** Keeps the CA service enabled in
    `services.d/ca.cfg`, and when no CA exists yet runs `puppetserver ca
    setup`, so the CA is a root certificate plus an intermediate signing
    certificate with a 15-year lifetime, the way the PE installer makes it.
    Left to its first start, the service makes a single self-signed CA
    certificate that expires with `ca_ttl`, five years by default. An
    existing CA is never touched.
-5. **Keeps the service running** and enabled, and restarts it when the server
-   package or its configuration changes.
+6. **Keeps the service running** and enabled. It is restarted when the
+   package, `webserver.conf` or `services.d/ca.cfg` changes, and reloaded,
+   which keeps the JVM and takes a few seconds, when `puppet.conf` or
+   `ca.conf` changes. Both block until the server serves again, so an agent
+   applying this catalog on the server host still delivers its report.
 
 Before that it warns, and changes nothing, when a package is held by
 `apt-mark hold` or `versionlock`, when the host has less memory than 1.1
@@ -99,6 +107,20 @@ class { 'openvox_server':
 }
 ```
 
+Listen on one address only, insist on client certificates, and harden the
+listener with settings the class has no parameter for:
+
+```puppet
+class { 'openvox_server':
+  ssl_host                 => '10.0.0.1',
+  client_auth              => 'need',
+  webserver_extra_settings => {
+    'ssl-protocols'             => ['TLSv1.3'],
+    'idle-timeout-milliseconds' => 60000,
+  },
+}
+```
+
 Use a mirror of the Vox Pupuli repositories with `apt_source` and
 `yum_source`, or set `manage_repo => false` when another module manages the
 repository. Set `manage_agent => false` when something else manages
@@ -125,9 +147,8 @@ for every parameter.
   `ca_crt.pem`, so a CA the service made for itself, or one made by hand,
   stays. Rebuilding a CA is a migration, not a Puppet run.
 - **Everything else in `puppet.conf` and `conf.d`.** Only the settings
-  listed above are managed, and each only when given. `webserver.conf`,
-  the JVM settings, `auth.conf` rules and the rest are not managed yet (see
-  the plan).
+  listed above are managed, and each only when given. The JVM settings,
+  `auth.conf` rules and the rest are not managed yet (see the plan).
 
 ## Facts
 

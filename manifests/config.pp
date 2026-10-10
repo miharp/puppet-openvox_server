@@ -1,13 +1,39 @@
-# @summary Sets the puppet.conf [server] and ca.conf settings that are given
+# @summary Owns webserver.conf and sets the puppet.conf [server] and ca.conf settings that are given
 #
-# Each setting is only declared when its parameter is set, and the rest of
-# both files is left alone.
+# `webserver.conf` is written whole and the service restarted when it
+# changes. Each `puppet.conf` and `ca.conf` setting is only declared when its
+# parameter is set, the rest of both files is left alone, and a change
+# reloads the service: the server re-reads `conf.d` and starts fresh JRuby
+# instances, which read `puppet.conf`, without restarting the JVM.
 #
 # @api private
 #
 class openvox_server::config {
   $puppet_conf = '/etc/puppetlabs/puppet/puppet.conf'
-  $ca_conf = '/etc/puppetlabs/puppetserver/conf.d/ca.conf'
+  $confdir = '/etc/puppetlabs/puppetserver'
+  $ca_conf = "${confdir}/conf.d/ca.conf"
+  $restart = $openvox_server::manage_service ? {
+    true    => Service[$openvox_server::service_name],
+    default => undef,
+  }
+  $reload = ($openvox_server::manage_service and $openvox_server::service_ensure == 'running') ? {
+    true    => Exec['openvox_server reload puppetserver'],
+    default => undef,
+  }
+
+  if $openvox_server::manage_webserver {
+    file { "${confdir}/conf.d/webserver.conf":
+      ensure  => file,
+      content => epp('openvox_server/webserver.conf.epp', {
+        'ssl_host'          => $openvox_server::ssl_host,
+        'ssl_port'          => $openvox_server::ssl_port,
+        'client_auth'       => $openvox_server::client_auth,
+        'access_log_config' => $openvox_server::access_log_config,
+        'extra_settings'    => $openvox_server::webserver_extra_settings,
+      }),
+      notify  => $restart,
+    }
+  }
 
   $server_settings = {
     'dns_alt_names' => $openvox_server::dns_alt_names ? {
@@ -28,6 +54,7 @@ class openvox_server::config {
       section => 'server',
       setting => $setting,
       value   => $value,
+      notify  => $reload,
     }
   }
 
@@ -48,6 +75,7 @@ class openvox_server::config {
       setting => "certificate-authority.${setting}",
       value   => $value,
       type    => $type,
+      notify  => $reload,
     }
   }
 }
