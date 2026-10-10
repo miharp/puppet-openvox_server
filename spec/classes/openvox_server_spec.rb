@@ -14,21 +14,36 @@ describe 'openvox_server' do
       end
 
       # A host bootstrapped with an OpenVox 8 agent and no server yet.
-      let(:server_state) do
+      let(:server_state) { { 'held_packages' => [] } }
+      let(:agent_state) do
         {
           'agent_package' => 'openvox-agent',
           'release_packages' => ['openvox8-release'],
+          'server_packages' => [],
           'held_packages' => [],
+          'service' => { 'running' => true, 'enabled' => true },
+          'server_configured' => true,
         }
       end
-      let(:facts) { os_facts.merge(aio_agent_version: '8.29.0', openvox_server: server_state) }
+      let(:facts) { os_facts.merge(aio_agent_version: '8.29.0', openvox_server: server_state, openvox_agent: agent_state) }
 
       debian = os_facts[:os]['family'] == 'Debian'
       debian12 = os_facts[:os]['name'] == 'Debian' && os_facts[:os]['release']['major'] == '12'
 
       context 'with defaults on a host without a server' do
         it { is_expected.to compile.with_all_deps }
-        it { is_expected.to contain_class('openvox_server::repo').that_comes_before('Class[openvox_server::install]') }
+
+        it do
+          is_expected.to contain_class('openvox_agent')
+            .with_collection('openvox8')
+            .with_package_version('present')
+            .with_manage_repo(true)
+            .with_apt_source('https://apt.voxpupuli.org')
+            .with_yum_source('https://yum.voxpupuli.org')
+            .with_manage_server_hosts(true)
+        end
+
+        it { is_expected.to contain_class('openvox_agent::repo').that_comes_before('Package[openvox-server]') }
         it { is_expected.to contain_class('openvox_server::config').that_requires('Class[openvox_server::install]') }
         it { is_expected.to contain_class('openvox_server::ca').that_requires('Class[openvox_server::config]') }
         it { is_expected.to contain_class('openvox_server::service').that_requires('Class[openvox_server::config]') }
@@ -74,26 +89,26 @@ describe 'openvox_server' do
 
         it { is_expected.to contain_package('openvox8-release') }
         it { is_expected.to contain_package('openvox-server').with_ensure('present').with_install_options([]) }
-        it { is_expected.to contain_package('openvox-agent').with_ensure('present').with_install_options([]).that_requires('Package[openvox-server]') }
+        it { is_expected.to contain_package('openvox-agent').with_ensure('present').that_requires('Package[openvox-server]') }
+        it { is_expected.to contain_exec('openvox_agent restore agent service after package change') }
         it { is_expected.to contain_service('puppetserver').with_ensure('running').with_enable(true).that_subscribes_to('Package[openvox-server]') }
         it { is_expected.not_to contain_exec('openvox_server refresh the package index for openvox-server') }
-        it { is_expected.not_to contain_exec('openvox_server refresh the package index for openvox-agent') }
 
         if debian
-          it { is_expected.to contain_file('/var/cache/openvox_server').with_ensure('directory').without_recurse.without_purge }
+          it { is_expected.to contain_file('/var/cache/openvox_agent').with_ensure('directory').without_recurse.without_purge }
 
           it do
-            is_expected.to contain_file("/var/cache/openvox_server/openvox8-release-#{platform}.deb")
+            is_expected.to contain_file("/var/cache/openvox_agent/openvox8-release-#{platform}.deb")
               .with_source("https://apt.voxpupuli.org/openvox8-release-#{platform}.deb")
           end
 
           it do
             is_expected.to contain_package('openvox8-release')
               .with_provider('dpkg')
-              .with_source("/var/cache/openvox_server/openvox8-release-#{platform}.deb")
+              .with_source("/var/cache/openvox_agent/openvox8-release-#{platform}.deb")
           end
 
-          it { is_expected.to contain_exec('openvox_server apt-get update').that_subscribes_to('Package[openvox8-release]') }
+          it { is_expected.to contain_exec('openvox_agent apt-get update').that_subscribes_to('Package[openvox8-release]') }
         else
           it do
             is_expected.to contain_package('openvox8-release')
@@ -116,6 +131,7 @@ describe 'openvox_server' do
             'tls_termination' => false,
           )
         end
+        let(:agent_state) { super().merge('server_packages' => ['openvox-server']) }
 
         it { is_expected.to compile.with_all_deps }
         it { is_expected.to contain_package('openvox8-release') }
@@ -131,8 +147,8 @@ describe 'openvox_server' do
         end
 
         context 'with defaults on a host with an OpenVox 9 agent' do
-          let(:server_state) { super().merge('release_packages' => ['openvox9-release']) }
-          let(:facts) { os_facts.merge(aio_agent_version: '9.0.1', openvox_server: server_state) }
+          let(:agent_state) { super().merge('release_packages' => ['openvox9-release']) }
+          let(:facts) { os_facts.merge(aio_agent_version: '9.0.1', openvox_server: server_state, openvox_agent: agent_state) }
 
           it { is_expected.to compile.and_raise_error(%r{not packaged for Debian 12}) }
         end
@@ -145,9 +161,11 @@ describe 'openvox_server' do
               'collection' => 'openvox8',
             )
           end
+          let(:agent_state) { super().merge('server_packages' => ['openvox-server']) }
           let(:params) { { collection: 'openvox9', package_version: 'latest', agent_package_version: 'latest' } }
 
           it { is_expected.to compile.with_all_deps }
+          it { is_expected.to contain_class('openvox_agent').with_collection('openvox9').with_package_version('latest') }
           it { is_expected.to contain_package('openvox-server').with_ensure('latest') }
           it { is_expected.to contain_package('openvox-agent').with_ensure('latest').that_requires('Package[openvox-server]') }
           it { is_expected.to contain_package('openvox9-release') }
@@ -157,11 +175,11 @@ describe 'openvox_server' do
             it do
               is_expected.to contain_package('openvox8-release')
                 .that_comes_before('Package[openvox9-release]')
-                .that_requires("File[/var/cache/openvox_server/openvox9-release-#{platform}.deb]")
+                .that_requires("File[/var/cache/openvox_agent/openvox9-release-#{platform}.deb]")
             end
 
             it do
-              is_expected.to contain_file("/var/cache/openvox_server/openvox8-release-#{platform}.deb")
+              is_expected.to contain_file("/var/cache/openvox_agent/openvox8-release-#{platform}.deb")
                 .with_ensure('absent')
                 .that_requires('Package[openvox9-release]')
             end
@@ -171,8 +189,8 @@ describe 'openvox_server' do
         end
 
         context 'with defaults on a host with an OpenVox 9 agent' do
-          let(:server_state) { super().merge('release_packages' => ['openvox9-release']) }
-          let(:facts) { os_facts.merge(aio_agent_version: '9.0.1', openvox_server: server_state) }
+          let(:agent_state) { super().merge('release_packages' => ['openvox9-release']) }
+          let(:facts) { os_facts.merge(aio_agent_version: '9.0.1', openvox_server: server_state, openvox_agent: agent_state) }
 
           it { is_expected.to compile.with_all_deps }
           it { is_expected.to contain_package('openvox9-release') }
@@ -181,19 +199,17 @@ describe 'openvox_server' do
       end
 
       context 'with a Puppet 7 server and no collection' do
-        let(:server_state) do
-          super().merge('server_package' => 'puppetserver', 'version' => '7.17.0-1.el9', 'agent_package' => 'puppet-agent', 'release_packages' => ['puppet7-release'])
-        end
-        let(:facts) { os_facts.merge(aio_agent_version: '7.34.0', openvox_server: server_state) }
+        let(:server_state) { super().merge('server_package' => 'puppetserver', 'version' => '7.17.0-1.el9') }
+        let(:agent_state) { super().merge('agent_package' => 'puppet-agent', 'release_packages' => ['puppet7-release'], 'server_packages' => ['puppetserver']) }
+        let(:facts) { os_facts.merge(aio_agent_version: '7.34.0', openvox_server: server_state, openvox_agent: agent_state) }
 
         it { is_expected.to compile.and_raise_error(%r{set collection}) }
       end
 
       context 'with a Puppet 7 server and an explicit collection' do
-        let(:server_state) do
-          super().merge('server_package' => 'puppetserver', 'version' => '7.17.0-1.el9', 'agent_package' => 'puppet-agent', 'release_packages' => ['puppet7-release'])
-        end
-        let(:facts) { os_facts.merge(aio_agent_version: '7.34.0', openvox_server: server_state) }
+        let(:server_state) { super().merge('server_package' => 'puppetserver', 'version' => '7.17.0-1.el9') }
+        let(:agent_state) { super().merge('agent_package' => 'puppet-agent', 'release_packages' => ['puppet7-release'], 'server_packages' => ['puppetserver']) }
+        let(:facts) { os_facts.merge(aio_agent_version: '7.34.0', openvox_server: server_state, openvox_agent: agent_state) }
         let(:params) { { collection: 'openvox8' } }
 
         it { is_expected.to compile.with_all_deps }
@@ -231,7 +247,7 @@ describe 'openvox_server' do
           end
 
           it do
-            is_expected.to contain_exec('openvox_server refresh the package index for openvox-agent')
+            is_expected.to contain_exec('openvox_agent refresh the package index for the pinned version')
               .with_unless("dpkg-query -W -f='${Version}' openvox-agent 2>/dev/null | grep -qxF '8.29.0-1+#{platform}'")
               .that_comes_before('Package[openvox-agent]')
           end
@@ -265,7 +281,7 @@ describe 'openvox_server' do
         let(:params) { { apt_source: 'https://mirror.example.com/apt', yum_source: 'https://mirror.example.com/yum' } }
 
         if debian
-          it { is_expected.to contain_file("/var/cache/openvox_server/openvox8-release-#{platform}.deb").with_source(%r{\Ahttps://mirror\.example\.com/apt/}) }
+          it { is_expected.to contain_file("/var/cache/openvox_agent/openvox8-release-#{platform}.deb").with_source(%r{\Ahttps://mirror\.example\.com/apt/}) }
         else
           it { is_expected.to contain_package('openvox8-release').with_source(%r{\Ahttps://mirror\.example\.com/yum/}) }
         end
@@ -275,15 +291,18 @@ describe 'openvox_server' do
         let(:params) { { manage_repo: false } }
 
         it { is_expected.to compile.with_all_deps }
-        it { is_expected.not_to contain_class('openvox_server::repo') }
-        it { is_expected.to contain_package('openvox-server') }
+        it { is_expected.to contain_class('openvox_agent').with_manage_repo(false) }
+        it { is_expected.not_to contain_class('openvox_agent::repo') }
+        it { is_expected.to contain_package('openvox-server').that_comes_before('Package[openvox-agent]') }
       end
 
       context 'with manage_agent false' do
         let(:params) { { manage_agent: false } }
 
         it { is_expected.to compile.with_all_deps }
+        it { is_expected.not_to contain_class('openvox_agent') }
         it { is_expected.not_to contain_package('openvox-agent') }
+        it { is_expected.not_to contain_package('openvox8-release') }
         it { is_expected.to contain_package('openvox-server') }
       end
 
@@ -293,7 +312,8 @@ describe 'openvox_server' do
         it { is_expected.to contain_package('java-21-openjdk-headless').with_ensure('installed').that_comes_before('Package[openvox-server]') }
       end
 
-      context 'with a java_package declared elsewhere' do
+      # pre_condition is one let too many for the cop.
+      context 'with a java_package declared elsewhere' do # rubocop:disable RSpec/MultipleMemoizedHelpers
         let(:pre_condition) { "package { 'java-21-openjdk-headless': ensure => '21.0.4' }" }
         let(:params) { { java_package: 'java-21-openjdk-headless' } }
 
@@ -526,6 +546,7 @@ describe 'openvox_server' do
             'java' => { 'path' => '/usr/lib/jvm/java-11/bin/java', 'version' => 11 },
           )
         end
+        let(:agent_state) { super().merge('server_packages' => ['openvox-server']) }
 
         it { is_expected.to compile.with_all_deps }
       end

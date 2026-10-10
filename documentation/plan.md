@@ -46,16 +46,16 @@ Numbered so acceptance tests and the README can cite them.
   at `present`, `latest`, or a version. Bare versions expand to the platform
   package version the way the agent module does (`9.0.1-1.el9`,
   `9.0.1-1+ubuntu24.04`).
-- **R2** Manage the collection's release package the way the agent module
-  does (`manage_repo`, `apt_source`, `yum_source`), with the same stale
-  release-package removal. Server hosts are not covered by the agent module
-  (it warns and does nothing on them), so this module owns the repo on its
-  hosts.
-- **R3** Manage `openvox-agent` on the server host too. The two packages pin
-  each other's major, so the server module must order the server package
-  before the agent package on EL (dnf moves both in one transaction) and
-  apply the agent pin after. Logic lifted from control-repo
-  `profile::openvox_server`.
+- **R2** The collection's release package is managed by miharp/openvox_agent
+  (`manage_repo`, `apt_source`, `yum_source` pass through), declared with
+  `manage_server_hosts` since on its own it leaves server hosts alone.
+- **R3** `openvox-agent` on the server host is managed by openvox_agent too
+  (`agent_package_version` passes through), and the agent service put back
+  after a package change the way it does on agents. The two packages pin
+  each other's major, so this module orders the server package between
+  `openvox_agent::repo` and the agent package (dnf and apt move both in one
+  transaction) and the agent pin applies after. When openvox_agent leaves
+  the host alone (`$openvox_agent::left_alone`), the server stays too.
 - **R4** Support in-collection upgrades and the 8 to 9 move with an explicit
   `collection`. Across the move: keep `JAVA_ARGS` the operator set (dpkg
   conffile handling, see ovadm `install_server.sh`), and put back the
@@ -153,9 +153,10 @@ Stated in the README so the module is not judged against the Foreman class.
 
 Each needs a call before the milestone that depends on it.
 
-- **D0 Own modules.** Dependencies on the author's other modules
-  (openvox_tune, and later perhaps openvox_agent for the repo and package
-  logic copied in M1) are welcome; the family should compose. Puppet Labs
+- **D0 Own modules.** Dependencies on the author's other modules are
+  welcome; the family should compose. openvox_tune sizes the server (R12),
+  openvox_agent owns the repository and the agent package (R2, R3; the M1
+  copies were removed once openvox_agent 0.2.0 could act on server hosts). Puppet Labs
   dependencies are tolerated where no own module does the job, and
   replaced when that is cheap. Decided 2026-10-10.
 - **D1 Dependencies.** The agent module has none. The server module edits
@@ -202,8 +203,8 @@ M0 and M1 are one session each. M4 reuses the #701 steps nearly verbatim.
 
 ## Inputs to lift from
 
-- puppet-openvox_agent: `repo.pp`, `install.pp` version expansion,
-  `service.pp` no-block restart, the fact, every tooling file.
+- puppet-openvox_agent: a dependency since 0.2.0 (repo, agent package,
+  agent service, `openvox_agent::package_version`); every tooling file.
 - ovadm tasks: `install_server.sh` (conffile and `puppet.conf` handling),
   `ca_setup.sh`, `configure_ca_renewal.sh`, `configure_compiler_ssl.sh`,
   `select_java.sh`, `precheck.sh` memory rule.

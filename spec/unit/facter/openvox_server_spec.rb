@@ -59,13 +59,11 @@ describe 'openvox_server fact' do
       allow(File).to receive(:readlines).with("#{conf_dir}/conf.d/auth.conf").and_return(["authorization: {\n", "  # allow-header-cert-info: true\n", "  version: 1\n"])
     end
 
-    it 'reports the server, its collection, the Java it runs, the heap and the config state' do
+    it 'reports the server, its collection, the hold, the Java it runs, the heap and the config state' do
       expect(fact).to eq(
         'server_package' => 'openvox-server',
         'version' => '9.0.1-1+debian12',
         'collection' => 'openvox9',
-        'agent_package' => 'openvox-agent',
-        'release_packages' => %w[openvox8-release openvox9-release],
         'held_packages' => ['openvox-server'],
         'java' => { 'path' => '/usr/lib/jvm/java-21-openjdk-amd64/bin/java', 'version' => 21 },
         'defaults_file' => '/etc/default/puppetserver',
@@ -105,14 +103,12 @@ describe 'openvox_server fact' do
       allow(File).to receive(:readlines).with("#{conf_dir}/conf.d/auth.conf").and_return(["authorization: {\n", "  allow-header-cert-info: true\n"])
     end
 
-    it 'reports the server, the versionlocked agent, the JAVA_BIN the start script runs and the CA off' do
+    it 'reports the server, the JAVA_BIN the start script runs and the CA off, and not the agent lock' do
       expect(fact).to eq(
         'server_package' => 'openvox-server',
         'version' => '8.8.1-1.el9',
         'collection' => 'openvox8',
-        'agent_package' => 'openvox-agent',
-        'release_packages' => ['openvox8-release'],
-        'held_packages' => ['openvox-agent'],
+        'held_packages' => [],
         'java' => { 'path' => '/usr/lib/jvm/java-1.8.0-openjdk/bin/java', 'version' => 8 },
         'defaults_file' => '/etc/sysconfig/puppetserver',
         'heap_mb' => 512,
@@ -130,12 +126,8 @@ describe 'openvox_server fact' do
                                                          .and_return("openvox9-release 9.0.0-1.el9\nopenvox-agent 9.0.1-1.el9\n")
     end
 
-    it 'reports the agent and leaves the server keys out' do
-      expect(fact).to eq(
-        'agent_package' => 'openvox-agent',
-        'release_packages' => ['openvox9-release'],
-        'held_packages' => [],
-      )
+    it 'leaves the server keys out' do
+      expect(fact).to eq('held_packages' => [])
     end
   end
 

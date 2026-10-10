@@ -65,7 +65,6 @@ describe 'openvox_server' do
         expect(fact).to include(
           'server_package' => 'openvox-server',
           'collection' => ENV.fetch('BEAKER_PUPPET_COLLECTION', 'openvox9'),
-          'agent_package' => 'openvox-agent',
           'ca_enabled' => true,
           'tls_termination' => false,
         )

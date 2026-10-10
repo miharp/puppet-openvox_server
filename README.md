@@ -21,20 +21,19 @@ include openvox_server
 
 ## What a run does
 
-1. **Switches the package repository.** Installs the collection's release
-   package (`openvox9-release`, say) from
-   [apt.voxpupuli.org](https://apt.voxpupuli.org) or
-   [yum.voxpupuli.org](https://yum.voxpupuli.org), and removes the release
-   packages of other OpenVox and Puppet major versions. On Debian and Ubuntu
-   the old OpenVox release package has to go first, since each ships the same
-   apt preferences file; on EL the old ones are removed after the new one is
-   in.
-2. **Installs openvox-server** at `package_version`, then **openvox-agent** at
-   `agent_package_version`. The server package requires an agent of its own
-   major version and the agent conflicts with a server of another, so neither
-   crosses a major alone: the server goes first, the package manager moves
-   the agent with it in the same transaction, and the agent's own pin applies
-   after.
+1. **Switches the repository and keeps the agent**, through
+   [openvox_agent](https://forge.puppet.com/modules/miharp/openvox_agent):
+   the collection's release package replaces other OpenVox and Puppet
+   majors' release packages, `openvox-agent` is kept at
+   `agent_package_version`, and the agent service is put back after the
+   package changes. On its own, openvox_agent leaves server hosts alone;
+   this class tells it not to.
+2. **Installs openvox-server** at `package_version`, ordered between the
+   repository and the agent. The server package requires an agent of its
+   own major version and the agent conflicts with a server of another, so
+   neither crosses a major alone: the server goes first, the package
+   manager moves the agent with it in the same transaction, and the agent's
+   own pin applies after.
 3. **Owns `webserver.conf`.** The address and port the server listens on,
    whether it asks clients for a certificate, the request log configuration,
    and any further `webserver` setting given through
@@ -150,10 +149,12 @@ for every parameter.
 
 ## What it leaves alone
 
-- **The agent module's hosts.** `openvox_agent` leaves server hosts alone
-  with a warning, so this class owns `openvox-agent` here. Do not assign
-  both classes to a host that has no server yet: both would declare the
-  agent package.
+- **An agent that would lose its server.** openvox_agent does not move an
+  agent to OpenVox 9 while it reaches its server only through the implicit
+  `server=puppet` that 9 removed, and says so. This class then leaves the
+  server package at its installed version too, since moving it would drag
+  the agent along. Set `server` in `puppet.conf` first. Do not declare
+  `openvox_agent` yourself on a server host: this class declares it.
 - **Puppet 7 servers.** A host running `puppetserver` and `puppet-agent` has
   no OpenVox collection to default to and takes an explicit `collection`.
   Moving a Puppet 7 server is not covered yet; use
@@ -177,9 +178,7 @@ The module ships one structured fact, `openvox_server`:
 | `server_package` | `openvox-server` or `puppetserver` |
 | `version` | that package's version |
 | `collection` | the installed `openvox-server`'s collection, such as `openvox9` |
-| `agent_package` | `openvox-agent` or `puppet-agent` |
-| `release_packages` | installed `openvox<N>-release` and `puppet<N>-release` packages |
-| `held_packages` | server and agent packages held by apt-mark or versionlock |
+| `held_packages` | server packages held by apt-mark or versionlock (openvox_agent's fact covers the agent) |
 | `java` | the Java the service runs, as `path` and major `version` |
 | `defaults_file` | `/etc/default/puppetserver` or `/etc/sysconfig/puppetserver` |
 | `heap_mb` | the `-Xmx` in `JAVA_ARGS` of the defaults file |
@@ -195,9 +194,10 @@ The module ships one structured fact, `openvox_server`:
   `openvox9` there with a message saying so.
 - Requires OpenVox 8 or 9 on the server compiling the catalog, which is the
   host it manages.
-- Depends on miharp/openvox_tune for the JVM and JRuby sizing, and on
-  puppetlabs/hocon and puppetlabs/inifile (which brings puppetlabs/stdlib)
-  for editing `ca.conf` and `puppet.conf` in place.
+- Depends on miharp/openvox_agent for the repository and the agent,
+  miharp/openvox_tune for the JVM and JRuby sizing, and on puppetlabs/hocon
+  and puppetlabs/inifile (which brings puppetlabs/stdlib) for editing
+  `ca.conf` and `puppet.conf` in place.
 
 ## Development
 

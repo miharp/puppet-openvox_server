@@ -12,17 +12,16 @@
 
 #### Private Classes
 
+* `openvox_server::agent`: Manages the repository and openvox-agent through openvox_agent
 * `openvox_server::ca`: Keeps the CA service enabled and sets the CA up before the first start
 * `openvox_server::config`: Owns webserver.conf and sets the puppet.conf [server] and ca.conf settings that are given
-* `openvox_server::install`: Ensures openvox-server and the openvox-agent it requires
-* `openvox_server::repo`: Installs the collection's release package in place of other major versions'
+* `openvox_server::install`: Ensures openvox-server
 * `openvox_server::service`: Keeps the server service running, restarts it when the package changes, and reloads it on request
 * `openvox_server::tuning`: Applies the JVM and JRuby sizing through openvox_tune
 
 ### Functions
 
 * [`openvox_server::hocon_value`](#openvox_server--hocon_value): Renders a value as a HOCON literal
-* [`openvox_server::package_version`](#openvox_server--package_version): Expands a bare version to the platform's package version
 
 ## Classes
 
@@ -36,12 +35,18 @@ server it manages.
 What a run does:
 
 1. Installs the collection's release package in place of other OpenVox and
-   Puppet major versions' release packages (`manage_repo`).
-2. Ensures openvox-server at `package_version`, then openvox-agent at
-   `agent_package_version` (`manage_agent`). The server package requires an
-   agent of its own major, so the server goes first: moving it across a
-   major moves the agent in the same package transaction, and the agent's
-   own pin is applied after.
+   Puppet major versions' release packages, and ensures openvox-agent at
+   `agent_package_version`, through
+   [openvox_agent](https://forge.puppet.com/modules/miharp/openvox_agent),
+   which on its own leaves server hosts alone (`manage_agent`,
+   `manage_repo`).
+2. Ensures openvox-server at `package_version`, ordered between the
+   repository and the agent: the server package requires an agent of its
+   own major, so moving it across a major moves the agent in the same
+   package transaction, and the agent's own pin is applied after. When
+   openvox_agent leaves the host alone, because its agent would lose the
+   implicit server that OpenVox 9 removed, the server stays where it is
+   too.
 3. Owns `webserver.conf`: the address and port the server listens on,
    whether it asks clients for a certificate, the access log configuration,
    and any further `webserver` settings given (`manage_webserver`).
@@ -174,8 +179,8 @@ Default value: `'present'`
 
 Data type: `String[1]`
 
-The same for openvox-agent on this host. The agent must share the
-server's major version.
+The same for openvox-agent on this host, passed to openvox_agent. The
+agent must share the server's major version.
 
 Default value: `'present'`
 
@@ -183,9 +188,10 @@ Default value: `'present'`
 
 Data type: `Boolean`
 
-Whether to install the collection's release package and remove other
-majors' release packages. Turn it off when the repository comes from
-somewhere else, such as a mirror configured by another module.
+Whether openvox_agent installs the collection's release package and
+removes other majors' release packages. Turn it off when the repository
+comes from somewhere else, such as a mirror configured by another
+module.
 
 Default value: `true`
 
@@ -209,9 +215,9 @@ Default value: `'https://yum.voxpupuli.org'`
 
 Data type: `Boolean`
 
-Whether to manage openvox-agent on this host. openvox_agent (the agent
-module) leaves server hosts alone, so this is the class that owns the
-agent package here. Turn it off when something else manages it.
+Whether to declare the openvox_agent class, which manages the
+repository and openvox-agent on this host. Turn it off when something
+else does both; `manage_repo` then has no effect.
 
 Default value: `true`
 
@@ -452,40 +458,3 @@ Returns: `String` The HOCON literal.
 Data type: `Variant[String, Numeric, Boolean, Array[Variant[String, Numeric, Boolean]]]`
 
 The value to render.
-
-### <a name="openvox_server--package_version"></a>`openvox_server::package_version`
-
-Type: Puppet Language
-
-`present`, `installed`, `latest` and versions containing a `-` are returned
-as they are. A bare version such as `9.0.1` becomes `9.0.1-1+debian12` on
-Debian and Ubuntu and `9.0.1-1.el9` on EL, the way the OpenVox packages are
-versioned.
-
-#### `openvox_server::package_version(String[1] $version, String[1] $platform, String[1] $os_family)`
-
-`present`, `installed`, `latest` and versions containing a `-` are returned
-as they are. A bare version such as `9.0.1` becomes `9.0.1-1+debian12` on
-Debian and Ubuntu and `9.0.1-1.el9` on EL, the way the OpenVox packages are
-versioned.
-
-Returns: `String[1]` The package version to ensure.
-
-##### `version`
-
-Data type: `String[1]`
-
-The requested version.
-
-##### `platform`
-
-Data type: `String[1]`
-
-The distribution release the packages are built for: `debian12`,
-`ubuntu24.04`, `el9`.
-
-##### `os_family`
-
-Data type: `String[1]`
-
-The `os.family` fact.

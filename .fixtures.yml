@@ -7,5 +7,6 @@ fixtures:
     augeas_core: https://github.com/puppetlabs/puppetlabs-augeas_core.git
     hocon: https://github.com/puppetlabs/puppetlabs-hocon.git
     inifile: https://github.com/puppetlabs/puppetlabs-inifile.git
+    openvox_agent: https://github.com/miharp/puppet-openvox_agent.git
     openvox_tune: https://github.com/miharp/puppet-openvox_tune.git
     stdlib: https://github.com/puppetlabs/puppetlabs-stdlib.git

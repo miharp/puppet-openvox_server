@@ -7,12 +7,8 @@
 # - server_package: openvox-server or puppetserver, whichever is installed
 # - version: that package's version, as the package manager reports it
 # - collection: the installed openvox-server's collection (openvox9)
-# - agent_package: openvox-agent or puppet-agent, whichever is installed
-# - release_packages: installed (openvox|puppet)<N>-release packages, the ones
-#   to replace when switching collections. On Debian this includes packages
-#   removed but not purged, whose repository files are still in place.
-# - held_packages: server and agent packages held by apt-mark or dnf/yum
-#   versionlock, which block an upgrade
+# - held_packages: server packages held by apt-mark or dnf/yum versionlock,
+#   which block an upgrade (the openvox_agent fact covers the agent)
 # Keys without a value are left out.
 #
 # - java: the Java the service runs, as path and major version: JAVA_BIN from
@@ -29,9 +25,7 @@ Facter.add(:openvox_server) do
 
   setcode do
     execution = Facter::Core::Execution
-    release_pattern = %r{\A(openvox|puppet)\d+-release\z}
     server_names = %w[openvox-server puppetserver]
-    agent_names = %w[openvox-agent puppet-agent]
     conf_dir = '/etc/puppetlabs/puppetserver'
 
     if execution.which('dpkg-query')
@@ -42,16 +36,14 @@ Facter.add(:openvox_server) do
                         .lines.map(&:split).select { |fields| fields.length == 3 }
       installed = states.select { |_name, status, _version| status[1] == 'i' }
                         .to_h { |name, _status, version| [name, version.sub(%r{\A\d+:}, '')] }
-      present = states.reject { |_name, status, _version| status[1] == 'n' }.map(&:first)
       held = execution.execute('apt-mark showhold', on_fail: '').split
     elsif execution.which('rpm')
       installed = execution.execute("rpm -qa --queryformat '%{NAME} %{VERSION}-%{RELEASE}\\n'", on_fail: '')
                            .lines.map(&:split).select { |fields| fields.length == 2 }.to_h
-      present = installed.keys
       lock_files = ['/etc/dnf/plugins/versionlock.list', '/etc/yum/pluginconf.d/versionlock.list']
       locked = lock_files.select { |f| File.readable?(f) }.flat_map { |f| File.readlines(f) }
       # Entries look like "openvox-server-0:8.8.1-1.el9.*" (or without the epoch).
-      held = (server_names + agent_names).select { |name| locked.any? { |line| line.start_with?("#{name}-") } }
+      held = server_names.select { |name| locked.any? { |line| line.start_with?("#{name}-") } }
     else
       next nil
     end
@@ -148,9 +140,7 @@ Facter.add(:openvox_server) do
       'server_package' => server_package,
       'version' => version,
       'collection' => collection,
-      'agent_package' => agent_names.find { |name| installed.key?(name) },
-      'release_packages' => present.grep(release_pattern).sort,
-      'held_packages' => (held & (server_names + agent_names)).sort,
+      'held_packages' => (held & server_names).sort,
       'java' => java,
       'defaults_file' => defaults_file,
       'heap_mb' => heap_mb,
