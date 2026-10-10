@@ -128,7 +128,9 @@ describe 'openvox_server' do
     # the catalog, the service restarts during the run, and the report still
     # arrives because the restart blocks until the server serves again.
     before(:all) do
-      shell('mkdir -p /etc/puppetlabs/code/environments/production/manifests')
+      # Beaker's session has a restrictive umask, so the directory and the
+      # file have to be made readable to the puppet user by hand.
+      shell('mkdir -p /etc/puppetlabs/code/environments/production/manifests && chmod 0755 /etc/puppetlabs/code/environments/production/manifests')
       create_remote_file(default, '/etc/puppetlabs/code/environments/production/manifests/site.pp', <<~PUPPET)
         class { 'openvox_server':
           max_active_instances   => 2,
