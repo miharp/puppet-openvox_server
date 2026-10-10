@@ -1,0 +1,7 @@
+---
+# puppet_fixtures symlinks the module under test from metadata.json.
+fixtures:
+  repositories:
+    hocon: https://github.com/puppetlabs/puppetlabs-hocon.git
+    inifile: https://github.com/puppetlabs/puppetlabs-inifile.git
+    stdlib: https://github.com/puppetlabs/puppetlabs-stdlib.git

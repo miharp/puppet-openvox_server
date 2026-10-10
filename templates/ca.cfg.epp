@@ -1,0 +1,9 @@
+<%- | Boolean $ca_enabled | -%>
+# This file is managed by the openvox_server class; local changes are
+# overwritten.
+<% if $ca_enabled { -%>
+puppetlabs.services.ca.certificate-authority-service/certificate-authority-service
+<% } else { -%>
+puppetlabs.services.ca.certificate-authority-disabled-service/certificate-authority-disabled-service
+<% } -%>
+puppetlabs.trapperkeeper.services.watcher.filesystem-watch-service/filesystem-watch-service

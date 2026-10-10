@@ -20,6 +20,15 @@ Notable changes to openvox_server are recorded here. The format follows
   with less memory than 1.1 times the server's heap, and for a server whose
   service runs a Java it does not support. A clear failure for `openvox9` on
   Debian 12, where no OpenVox Server 9 package exists.
+- CA and settings (R7, R9, R10): the CA service is kept enabled in
+  `services.d/ca.cfg`, and before the service ever starts, when no CA exists,
+  `puppetserver ca setup` makes a root plus a 15-year intermediate instead of
+  the single self-signed certificate the service makes on first start
+  (`ca_name`, `subject_alt_names`). `allow_auto_renewal` and
+  `auto_renewal_cert_ttl` are set in `ca.conf`, and `dns_alt_names`,
+  `autosign` and `ca_server` in the `[server]` section of `puppet.conf`,
+  each only when given and without disturbing the rest of the file, through
+  puppetlabs/hocon and puppetlabs/inifile, the module's two dependencies.
 - The `openvox_server` fact: server package and version, collection, agent
   package, release packages, held packages, the Java the service runs, the
   defaults file and its heap, and whether the CA service and TLS termination

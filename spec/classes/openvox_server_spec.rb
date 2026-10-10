@@ -29,7 +29,30 @@ describe 'openvox_server' do
       context 'with defaults on a host without a server' do
         it { is_expected.to compile.with_all_deps }
         it { is_expected.to contain_class('openvox_server::repo').that_comes_before('Class[openvox_server::install]') }
-        it { is_expected.to contain_class('openvox_server::service').that_requires('Class[openvox_server::install]') }
+        it { is_expected.to contain_class('openvox_server::config').that_requires('Class[openvox_server::install]') }
+        it { is_expected.to contain_class('openvox_server::ca').that_requires('Class[openvox_server::config]') }
+        it { is_expected.to contain_class('openvox_server::service').that_subscribes_to('Class[openvox_server::config]') }
+        it { is_expected.to contain_class('openvox_server::service').that_subscribes_to('Class[openvox_server::ca]') }
+        it { is_expected.not_to contain_ini_setting(%r{openvox_server puppet.conf}) }
+        it { is_expected.not_to contain_hocon_setting(%r{openvox_server ca.conf}) }
+
+        it do
+          is_expected.to contain_file('/etc/puppetlabs/puppetserver/services.d/ca.cfg')
+            .with_ensure('file')
+            .with_content(%r{^puppetlabs.services.ca.certificate-authority-service/certificate-authority-service$})
+            .with_content(%r{^puppetlabs.trapperkeeper.services.watcher.filesystem-watch-service/filesystem-watch-service$})
+            .without_content(%r{^puppetlabs.services.ca.certificate-authority-disabled-service})
+        end
+
+        it do
+          is_expected.to contain_exec('openvox_server ca setup')
+            .with_command('puppetserver ca setup')
+            .with_creates('/etc/puppetlabs/puppetserver/ca/ca_crt.pem')
+            .with_path(['/opt/puppetlabs/bin', '/usr/bin', '/bin'])
+            .that_requires('File[/etc/puppetlabs/puppetserver/services.d/ca.cfg]')
+            .that_comes_before('Service[puppetserver]')
+        end
+
         it { is_expected.to contain_package('openvox8-release') }
         it { is_expected.to contain_package('openvox-server').with_ensure('present').with_install_options([]) }
         it { is_expected.to contain_package('openvox-agent').with_ensure('present').with_install_options([]).that_requires('Package[openvox-server]') }
@@ -257,6 +280,102 @@ describe 'openvox_server' do
 
         it { is_expected.to compile.with_all_deps }
         it { is_expected.to contain_package('java-21-openjdk-headless').with_ensure('21.0.4').that_comes_before('Package[openvox-server]') }
+      end
+
+      context 'with a CA name and subject alt names' do
+        let(:params) { { ca_name: 'Example CA', subject_alt_names: ['puppet', 'puppet.example.com'] } }
+
+        it { is_expected.to contain_exec('openvox_server ca setup').with_command("puppetserver ca setup --ca-name 'Example CA' --subject-alt-names 'puppet,puppet.example.com'") }
+      end
+
+      context 'with a CA name containing a quote' do
+        let(:params) { { ca_name: "Example's CA" } }
+
+        it { is_expected.to compile.and_raise_error(%r{ca_name}) }
+      end
+
+      context 'with manage_ca false' do
+        let(:params) { { manage_ca: false } }
+
+        it { is_expected.to compile.with_all_deps }
+        it { is_expected.not_to contain_class('openvox_server::ca') }
+        it { is_expected.not_to contain_exec('openvox_server ca setup') }
+        it { is_expected.not_to contain_file('/etc/puppetlabs/puppetserver/services.d/ca.cfg') }
+      end
+
+      context 'with renewal settings' do
+        let(:params) { { allow_auto_renewal: true, auto_renewal_cert_ttl: '90d' } }
+
+        it { is_expected.to compile.with_all_deps }
+
+        it do
+          is_expected.to contain_hocon_setting('openvox_server ca.conf allow-auto-renewal')
+            .with_ensure('present')
+            .with_path('/etc/puppetlabs/puppetserver/conf.d/ca.conf')
+            .with_setting('certificate-authority.allow-auto-renewal')
+            .with_value(true)
+            .with_type('boolean')
+            .that_notifies('Class[openvox_server::service]')
+        end
+
+        it do
+          is_expected.to contain_hocon_setting('openvox_server ca.conf auto-renewal-cert-ttl')
+            .with_setting('certificate-authority.auto-renewal-cert-ttl')
+            .with_value('90d')
+            .with_type('string')
+        end
+      end
+
+      context 'with renewal off' do
+        let(:params) { { allow_auto_renewal: false } }
+
+        it { is_expected.to contain_hocon_setting('openvox_server ca.conf allow-auto-renewal').with_value(false).with_type('boolean') }
+        it { is_expected.not_to contain_hocon_setting('openvox_server ca.conf auto-renewal-cert-ttl') }
+      end
+
+      context 'with a bad renewal ttl' do
+        let(:params) { { auto_renewal_cert_ttl: '90 days' } }
+
+        it { is_expected.to compile.and_raise_error(%r{auto_renewal_cert_ttl}) }
+      end
+
+      context 'with [server] settings' do
+        let(:params) { { dns_alt_names: ['puppet', 'puppet.example.com'], autosign: true, ca_server: 'ca.example.com' } }
+
+        it { is_expected.to compile.with_all_deps }
+
+        it do
+          is_expected.to contain_ini_setting('openvox_server puppet.conf server dns_alt_names')
+            .with_ensure('present')
+            .with_path('/etc/puppetlabs/puppet/puppet.conf')
+            .with_section('server')
+            .with_setting('dns_alt_names')
+            .with_value('puppet,puppet.example.com')
+            .that_notifies('Class[openvox_server::service]')
+        end
+
+        it { is_expected.to contain_ini_setting('openvox_server puppet.conf server autosign').with_section('server').with_value('true') }
+        it { is_expected.to contain_ini_setting('openvox_server puppet.conf server ca_server').with_section('server').with_value('ca.example.com') }
+        it { is_expected.to contain_class('openvox_server::config').that_comes_before('Class[openvox_server::ca]') }
+      end
+
+      context 'with an autosign script' do
+        let(:params) { { autosign: '/etc/puppetlabs/puppet/autosign.sh' } }
+
+        it { is_expected.to contain_ini_setting('openvox_server puppet.conf server autosign').with_value('/etc/puppetlabs/puppet/autosign.sh') }
+      end
+
+      context 'with autosign off' do
+        let(:params) { { autosign: false } }
+
+        it { is_expected.to contain_ini_setting('openvox_server puppet.conf server autosign').with_value('false') }
+        it { is_expected.not_to contain_ini_setting('openvox_server puppet.conf server dns_alt_names') }
+      end
+
+      context 'with a relative autosign path' do
+        let(:params) { { autosign: 'autosign.conf' } }
+
+        it { is_expected.to compile.and_raise_error(%r{autosign}) }
       end
 
       context 'with manage_service false' do
