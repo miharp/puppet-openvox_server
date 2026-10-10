@@ -22,7 +22,11 @@
 #    too.
 # 3. Owns `webserver.conf`: the address and port the server listens on,
 #    whether it asks clients for a certificate, the access log configuration,
-#    and any further `webserver` settings given (`manage_webserver`).
+#    and any further `webserver` settings given (`manage_webserver`). With
+#    `tls_termination`, the server listens on plain HTTP on `host` and
+#    `port` instead, for a reverse proxy that terminates TLS and passes the
+#    client certificate in headers, and `auth.conf` is told to trust those
+#    headers. The proxy itself is not managed.
 # 4. Sets the `[server]` settings in `puppet.conf` and the renewal settings
 #    in `ca.conf` that are given, and leaves the rest of both files alone.
 # 5. Keeps the CA service enabled in `services.d/ca.cfg`, and before the
@@ -66,6 +70,11 @@
 #     max_active_instances   => 7,
 #     heap_mb                => 4096,
 #     reserved_code_cache_mb => 1024,
+#   }
+#
+# @example Behind a reverse proxy that terminates TLS on this host
+#   class { 'openvox_server':
+#     tls_termination => true,
 #   }
 #
 # @example A CA with a name of its own, renewing agent certificates
@@ -135,6 +144,26 @@
 # @param access_log_config
 #   `webserver.access-log-config`, the logback configuration of the request
 #   log; the package ships one.
+#
+# @param tls_termination
+#   Whether a reverse proxy in front of the server terminates TLS. The
+#   server then listens on plain HTTP on `host` and `port`, with no
+#   `ssl-*` or `client-auth` settings, and `authorization.allow-header-cert-info`
+#   is set in `auth.conf` so the server takes the client's identity from the
+#   `X-Client-Verify`, `X-Client-DN` and `X-Client-Cert` headers the proxy
+#   sets. Anything that can reach that port can then claim to be any node,
+#   so keep it on the loopback address or firewalled to the proxy. When
+#   off, the setting is removed from `auth.conf` and the server terminates
+#   TLS itself.
+#
+# @param host
+#   With `tls_termination`, the address the server listens on for the
+#   proxy. A compiler behind a proxy on another host needs an address the
+#   proxy can reach; the class warns when it is not a loopback address.
+#
+# @param port
+#   With `tls_termination`, the port the server listens on for the proxy;
+#   not 8140, which the proxy keeps serving agents on.
 #
 # @param webserver_extra_settings
 #   Further `webserver` settings, by their HOCON name, such as
@@ -225,6 +254,9 @@ class openvox_server (
   Integer[1, 65535]                   $ssl_port              = 8140,
   Enum['want', 'need', 'none']        $client_auth           = 'want',
   Pattern[/\A\//]                     $access_log_config     = '/etc/puppetlabs/puppetserver/request-logging.xml',
+  Boolean                             $tls_termination       = false,
+  String[1]                           $host                  = '127.0.0.1',
+  Integer[1, 65535]                   $port                  = 8141,
   Hash[String[1], Variant[String, Numeric, Boolean, Array[Variant[String, Numeric, Boolean]]]] $webserver_extra_settings = {},
   Boolean                             $manage_tuning         = true,
   Optional[Integer[1]]                $max_active_instances  = undef,
@@ -258,10 +290,20 @@ class openvox_server (
     }
   }
 
-  $owned_webserver_settings = ['ssl-host', 'ssl-port', 'client-auth', 'access-log-config']
+  $owned_webserver_settings = ['ssl-host', 'ssl-port', 'client-auth', 'access-log-config', 'host', 'port']
   $clashing = $webserver_extra_settings.keys.filter |$setting| { $setting in $owned_webserver_settings }
   unless $clashing.empty {
     fail("openvox_server: webserver_extra_settings cannot set ${clashing.join(', ')}; use the parameters for them.")
+  }
+
+  # With allow-header-cert-info the server believes whatever X-Client-*
+  # headers it is sent, so its HTTP port must only be reachable by the proxy.
+  if $tls_termination and $host !~ /\A(127\.\d+\.\d+\.\d+|::1|localhost)\z/ {
+    warning(@("MSG"/L))
+      openvox_server: ${trusted['certname']} listens for its TLS-terminating proxy on ${host}:${port}, \
+      which is not a loopback address; anything that can reach that port can claim to be any node. \
+      Make sure only the proxy can.
+      | MSG
   }
 
   if $resolved_collection =~ Undef {

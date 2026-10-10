@@ -99,14 +99,16 @@ Numbered so acceptance tests and the README can cite them.
   restart is turned off and this module restarts or reloads.
   `max_requests_per_instance` waits for a need.
 - **R13** `tls_termination => true`: `webserver.conf` becomes `host` and
-  `port` (defaults `127.0.0.1` and `8141`), no `ssl-*` keys, and
-  `authorization.allow-header-cert-info: true` in `auth.conf`. Only the
-  `authorization` form, never the deprecated `master.*` alias
+  `port` (defaults `127.0.0.1` and `8141`), no `ssl-*` or `client-auth`
+  keys, and `authorization.allow-header-cert-info: true` in `auth.conf`.
+  Only the `authorization` form, never the deprecated `master.*` alias
   (openvox-server#207). Bind address is a parameter for compilers behind a
   remote proxy, with a `warning()` when it is not a loopback address and
   the README saying why. The proxy itself is not managed (see out of scope).
-- **R14** `auth.conf`: only `allow-header-cert-info` in v1. Rules stay the
-  operator's. The key is set without disturbing the rest of the file.
+  Done in M4 (2026-10-10).
+- **R14** `auth.conf`: only `allow-header-cert-info` in v1, present with
+  `tls_termination` and removed without, through `hocon_setting`. Rules
+  stay the operator's. Done in M4.
 - **R15** Service: `running`/`enabled`; restart on changes to
   `webserver.conf`, the defaults file and `services.d`; `puppetserver reload`
   on changes to `puppetserver.conf`, `ca.conf` and `auth.conf` where the
@@ -194,7 +196,7 @@ smaller; never fold a fix into a feature PR.
 | M1 | R1, R2, R3, R5, R6, R16: install, repo, agent pin, fact, service running | D2 | Beaker standard install green on openvox9 and openvox8 |
 | M2 | R7, R9, R10: CA setup before first start, renewal settings, `[server]` settings | D1 | Beaker: fresh host ends with root + intermediate CA, agent runs against itself |
 | M3 | R11, R12, R15: webserver.conf, JVM through openvox_tune, reload/restart behaviour | D4 | Unit coverage; beaker check that heap and instance changes take effect through the host's own agent run |
-| M4 | R13, R14: TLS termination | M2, M3 | Beaker nginx case green (ported from #701) |
+| M4 | R13, R14: TLS termination | M2, M3 | Beaker nginx case green (ported from #701): trusted facts through the proxy, bootstrap, forged headers, CRL reload |
 | M5 | R8: compiler mode | M2 | Lab: compiler bootstraps through the CA, agent gets a catalog from it |
 | M6 | R4, R21: 8 to 9 move, README, examples, REFERENCE, `0.1.0` on the Forge | M1–M5 | control-repo `profile::openvox_server` replaced by the module on the Hetzner lab; template example PR opened; Slack reply to Charlie with the link |
 | M7 | ovadm `apply`s this class for configuration instead of its shell tasks | M6 | ovadm install on the lab produces the same files the module does |

@@ -38,7 +38,10 @@ include openvox_server
    whether it asks clients for a certificate, the request log configuration,
    and any further `webserver` setting given through
    `webserver_extra_settings`. The file is written whole, so a setting not
-   given through the class is not kept.
+   given through the class is not kept. With `tls_termination`, the server
+   listens on plain HTTP on `host` and `port` for a reverse proxy instead,
+   and `auth.conf` is told to trust the client certificate headers the
+   proxy sets.
 4. **Sets the settings it is given** and nothing else: `dns_alt_names`,
    `autosign` and `ca_server` in the `[server]` section of `puppet.conf`,
    and `allow-auto-renewal` and `auto-renewal-cert-ttl` in `ca.conf`. A
@@ -123,6 +126,25 @@ class { 'openvox_server':
 }
 ```
 
+Put the server behind a reverse proxy that terminates TLS on the same host.
+The server moves to plain HTTP on 127.0.0.1:8141 and trusts the
+`X-Client-Verify`, `X-Client-DN` and `X-Client-Cert` headers the proxy sets;
+the proxy keeps serving agents on 8140. The proxy is yours to manage; the
+[External SSL Termination](https://docs.openvoxproject.org/openvox-server/latest/external_ssl_termination.html)
+page has a complete nginx configuration, which the acceptance test uses:
+
+```puppet
+class { 'openvox_server':
+  tls_termination => true,
+}
+```
+
+With the headers trusted, anything that can open a connection to the
+server's port can claim to be any node, which is why the default binds to
+the loopback address. A compiler whose proxy runs elsewhere has to listen on
+a reachable address: set `host`, make sure only the proxy can reach the
+port, and expect a warning from the class each run.
+
 Listen on one address only, insist on client certificates, and harden the
 listener with settings the class has no parameter for:
 
@@ -164,9 +186,12 @@ for every parameter.
 - **An existing CA.** `puppetserver ca setup` only runs when there is no
   `ca_crt.pem`, so a CA the service made for itself, or one made by hand,
   stays. Rebuilding a CA is a migration, not a Puppet run.
+- **The reverse proxy.** The class makes the server fit for one and
+  nothing more. The proxy needs reloads when the CRL or the server
+  certificate changes, which a class for nginx owns naturally.
 - **Everything else in `puppet.conf` and `conf.d`.** Only the settings
-  listed above are managed, and each only when given. `JAVA_ARGS` other
-  than the heap and code cache, `auth.conf` rules and the rest are not
+  listed above are managed, and each only when given. `auth.conf` rules,
+  `JAVA_ARGS` other than the heap and code cache, and the rest are not
   managed yet (see the plan).
 
 ## Facts

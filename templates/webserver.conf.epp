@@ -1,4 +1,7 @@
-<%- | String[1] $ssl_host,
+<%- | Boolean $tls_termination,
+      String[1] $host,
+      Integer[1, 65535] $port,
+      String[1] $ssl_host,
       Integer[1, 65535] $ssl_port,
       Enum['want', 'need', 'none'] $client_auth,
       String[1] $access_log_config,
@@ -8,9 +11,14 @@
 # overwritten.
 webserver: {
     access-log-config: <%= $access_log_config %>
+<% if $tls_termination { -%>
+    host: <%= $host %>
+    port: <%= $port %>
+<% } else { -%>
     client-auth: <%= $client_auth %>
     ssl-host: <%= $ssl_host %>
     ssl-port: <%= $ssl_port %>
+<% } -%>
 <% $extra_settings.keys.sort.each |$setting| { -%>
     <%= $setting %>: <%= openvox_server::hocon_value($extra_settings[$setting]) %>
 <% } -%>

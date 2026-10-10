@@ -79,6 +79,16 @@ describe 'openvox_server' do
         end
 
         it do
+          is_expected.to contain_hocon_setting('openvox_server auth.conf allow-header-cert-info')
+            .with_ensure('absent')
+            .with_path('/etc/puppetlabs/puppetserver/conf.d/auth.conf')
+            .with_setting('authorization.allow-header-cert-info')
+            .that_notifies('Exec[openvox_server reload puppetserver]')
+        end
+
+        it { is_expected.to contain_file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf').without_content(%r{^    (host|port):}) }
+
+        it do
           is_expected.to contain_exec('openvox_server ca setup')
             .with_command('puppetserver ca setup')
             .with_creates('/etc/puppetlabs/puppetserver/ca/ca_crt.pem')
@@ -444,6 +454,49 @@ describe 'openvox_server' do
         let(:params) { { access_log_config: 'request-logging.xml' } }
 
         it { is_expected.to compile.and_raise_error(%r{access_log_config}) }
+      end
+
+      context 'with TLS termination' do
+        let(:params) { { tls_termination: true } }
+
+        it { is_expected.to compile.with_all_deps }
+
+        it do
+          is_expected.to contain_file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf')
+            .with_content(%r{^    access-log-config: /etc/puppetlabs/puppetserver/request-logging.xml$})
+            .with_content(%r{^    host: 127.0.0.1$})
+            .with_content(%r{^    port: 8141$})
+            .without_content(%r{ssl-})
+            .without_content(%r{client-auth})
+            .that_notifies('Service[puppetserver]')
+        end
+
+        it do
+          is_expected.to contain_hocon_setting('openvox_server auth.conf allow-header-cert-info')
+            .with_ensure('present')
+            .with_value(true)
+            .with_type('boolean')
+            .that_notifies('Exec[openvox_server reload puppetserver]')
+        end
+      end
+
+      context 'with TLS termination on another host and an extra setting' do
+        let(:params) { { tls_termination: true, host: '10.0.0.5', port: 8142, webserver_extra_settings: { 'idle-timeout-milliseconds' => 60_000 } } }
+
+        it { is_expected.to compile.with_all_deps }
+
+        it do
+          is_expected.to contain_file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf')
+            .with_content(%r{^    host: 10.0.0.5$})
+            .with_content(%r{^    port: 8142$})
+            .with_content(%r{^    idle-timeout-milliseconds: 60000$})
+        end
+      end
+
+      context 'with host among the extra webserver settings' do
+        let(:params) { { webserver_extra_settings: { 'host' => '0.0.0.0' } } }
+
+        it { is_expected.to compile.and_raise_error(%r{webserver_extra_settings cannot set host}) }
       end
 
       context 'with an owned webserver setting among the extra ones' do

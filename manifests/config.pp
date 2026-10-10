@@ -4,7 +4,9 @@
 # changes. Each `puppet.conf` and `ca.conf` setting is only declared when its
 # parameter is set, the rest of both files is left alone, and a change
 # reloads the service: the server re-reads `conf.d` and starts fresh JRuby
-# instances, which read `puppet.conf`, without restarting the JVM.
+# instances, which read `puppet.conf`, without restarting the JVM. In
+# `auth.conf` only `authorization.allow-header-cert-info` is managed, set
+# with `tls_termination` and removed without; the rules stay the operator's.
 #
 # @api private
 #
@@ -12,6 +14,7 @@ class openvox_server::config {
   $puppet_conf = '/etc/puppetlabs/puppet/puppet.conf'
   $confdir = '/etc/puppetlabs/puppetserver'
   $ca_conf = "${confdir}/conf.d/ca.conf"
+  $auth_conf = "${confdir}/conf.d/auth.conf"
   $restart = $openvox_server::manage_service ? {
     true    => Service[$openvox_server::service_name],
     default => undef,
@@ -25,6 +28,9 @@ class openvox_server::config {
     file { "${confdir}/conf.d/webserver.conf":
       ensure  => file,
       content => epp('openvox_server/webserver.conf.epp', {
+        'tls_termination'   => $openvox_server::tls_termination,
+        'host'              => $openvox_server::host,
+        'port'              => $openvox_server::port,
         'ssl_host'          => $openvox_server::ssl_host,
         'ssl_port'          => $openvox_server::ssl_port,
         'client_auth'       => $openvox_server::client_auth,
@@ -56,6 +62,22 @@ class openvox_server::config {
       value   => $value,
       notify  => $reload,
     }
+  }
+
+  # Only the authorization form: the master.allow-header-cert-info alias in
+  # puppetserver.conf is deprecated.
+  $header_cert_info_ensure = $openvox_server::tls_termination ? {
+    true    => present,
+    default => absent,
+  }
+
+  hocon_setting { 'openvox_server auth.conf allow-header-cert-info':
+    ensure  => $header_cert_info_ensure,
+    path    => $auth_conf,
+    setting => 'authorization.allow-header-cert-info',
+    value   => true,
+    type    => 'boolean',
+    notify  => $reload,
   }
 
   $ca_settings = {
