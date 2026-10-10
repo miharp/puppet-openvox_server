@@ -15,6 +15,10 @@
   ],
   "dependencies": [
     {
+      "name": "miharp/openvox_agent",
+      "version_requirement": ">= 0.2.0 < 1.0.0"
+    },
+    {
       "name": "miharp/openvox_tune",
       "version_requirement": ">= 0.1.0 < 1.0.0"
     },

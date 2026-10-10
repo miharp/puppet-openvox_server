@@ -8,12 +8,18 @@
 # What a run does:
 #
 # 1. Installs the collection's release package in place of other OpenVox and
-#    Puppet major versions' release packages (`manage_repo`).
-# 2. Ensures openvox-server at `package_version`, then openvox-agent at
-#    `agent_package_version` (`manage_agent`). The server package requires an
-#    agent of its own major, so the server goes first: moving it across a
-#    major moves the agent in the same package transaction, and the agent's
-#    own pin is applied after.
+#    Puppet major versions' release packages, and ensures openvox-agent at
+#    `agent_package_version`, through
+#    [openvox_agent](https://forge.puppet.com/modules/miharp/openvox_agent),
+#    which on its own leaves server hosts alone (`manage_agent`,
+#    `manage_repo`).
+# 2. Ensures openvox-server at `package_version`, ordered between the
+#    repository and the agent: the server package requires an agent of its
+#    own major, so moving it across a major moves the agent in the same
+#    package transaction, and the agent's own pin is applied after. When
+#    openvox_agent leaves the host alone, because its agent would lose the
+#    implicit server that OpenVox 9 removed, the server stays where it is
+#    too.
 # 3. Owns `webserver.conf`: the address and port the server listens on,
 #    whether it asks clients for a certificate, the access log configuration,
 #    and any further `webserver` settings given (`manage_webserver`).
@@ -84,13 +90,14 @@
 #   used as it is.
 #
 # @param agent_package_version
-#   The same for openvox-agent on this host. The agent must share the
-#   server's major version.
+#   The same for openvox-agent on this host, passed to openvox_agent. The
+#   agent must share the server's major version.
 #
 # @param manage_repo
-#   Whether to install the collection's release package and remove other
-#   majors' release packages. Turn it off when the repository comes from
-#   somewhere else, such as a mirror configured by another module.
+#   Whether openvox_agent installs the collection's release package and
+#   removes other majors' release packages. Turn it off when the repository
+#   comes from somewhere else, such as a mirror configured by another
+#   module.
 #
 # @param apt_source
 #   Base URL the Debian and Ubuntu release package is downloaded from.
@@ -99,9 +106,9 @@
 #   Base URL the EL release package is downloaded from.
 #
 # @param manage_agent
-#   Whether to manage openvox-agent on this host. openvox_agent (the agent
-#   module) leaves server hosts alone, so this is the class that owns the
-#   agent package here. Turn it off when something else manages it.
+#   Whether to declare the openvox_agent class, which manages the
+#   repository and openvox-agent on this host. Turn it off when something
+#   else does both; `manage_repo` then has no effect.
 #
 # @param java_package
 #   A JRE package to install before the server. Not needed with released
@@ -237,20 +244,14 @@ class openvox_server (
   Boolean                             $service_enable        = true,
 ) {
   $state = $facts['openvox_server'].lest || { {} }
+  $agent_state = $facts['openvox_agent'].lest || { {} }
   $held_packages = $state['held_packages'].lest || { [] }
-
-  # Release packages are published per distribution release: debian12,
-  # ubuntu24.04, el-9.
-  $platform = $facts['os']['name'] ? {
-    'Ubuntu' => "ubuntu${facts['os']['release']['full']}",
-    'Debian' => "debian${facts['os']['release']['major']}",
-    default  => "el${facts['os']['release']['major']}",
-  }
+  $platform = openvox_agent::platform()
 
   $resolved_collection = $collection.lest || {
     if $state['collection'] =~ NotUndef {
       $state['collection']
-    } elsif $state['agent_package'] == 'openvox-agent' and $facts['aio_agent_version'] =~ NotUndef {
+    } elsif $agent_state['agent_package'] == 'openvox-agent' and $facts['aio_agent_version'] =~ NotUndef {
       "openvox${facts['aio_agent_version'].split('\.')[0]}"
     } else {
       undef
@@ -332,9 +333,18 @@ class openvox_server (
     }
   }
 
-  if $manage_repo {
-    contain openvox_server::repo
-    Class['openvox_server::repo'] -> Class['openvox_server::install']
+  if $manage_agent {
+    contain openvox_server::agent
+    $agent_left_alone = $openvox_agent::left_alone
+  } else {
+    $agent_left_alone = undef
+  }
+
+  if $agent_left_alone {
+    warning(@("MSG"/L))
+      openvox_server: openvox_agent leaves ${trusted['certname']} alone (it ${agent_left_alone.strip}) \
+      so openvox-server stays at its installed version too.
+      | MSG
   }
 
   contain openvox_server::install
