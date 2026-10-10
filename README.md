@@ -45,17 +45,23 @@ include openvox_server
    and `allow-auto-renewal` and `auto-renewal-cert-ttl` in `ca.conf`. A
    setting left unset is left as it is, and the rest of each file is never
    touched.
-5. **Sets the CA up before the first start.** Keeps the CA service enabled in
+5. **Sizes the JVM and the JRuby pool** when told to: `heap_mb`,
+   `reserved_code_cache_mb` and `max_active_instances` are applied through
+   [openvox_tune](https://forge.puppet.com/modules/miharp/openvox_tune),
+   whose `openvox_tune::tune` plan recommends them for the host. On a host
+   where the server is installed in the same run, they apply from the next
+   run.
+6. **Sets the CA up before the first start.** Keeps the CA service enabled in
    `services.d/ca.cfg`, and when no CA exists yet runs `puppetserver ca
    setup`, so the CA is a root certificate plus an intermediate signing
    certificate with a 15-year lifetime, the way the PE installer makes it.
    Left to its first start, the service makes a single self-signed CA
    certificate that expires with `ca_ttl`, five years by default. An
    existing CA is never touched.
-6. **Keeps the service running** and enabled. It is restarted when the
-   package, `webserver.conf` or `services.d/ca.cfg` changes, and reloaded,
-   which keeps the JVM and takes a few seconds, when `puppet.conf` or
-   `ca.conf` changes. Both block until the server serves again, so an agent
+7. **Keeps the service running** and enabled. It is restarted when the
+   package, `webserver.conf`, `services.d/ca.cfg` or the JVM arguments
+   change, and reloaded, which keeps the JVM and takes a few seconds, when
+   `puppet.conf`, `ca.conf` or the instance count changes. Both block until the server serves again, so an agent
    applying this catalog on the server host still delivers its report.
 
 Before that it warns, and changes nothing, when a package is held by
@@ -107,6 +113,17 @@ class { 'openvox_server':
 }
 ```
 
+Size the server from the `openvox_tune::tune` plan's recommendation, which
+prints Hiera data for these three keys:
+
+```puppet
+class { 'openvox_server':
+  max_active_instances   => 7,
+  heap_mb                => 4096,
+  reserved_code_cache_mb => 1024,
+}
+```
+
 Listen on one address only, insist on client certificates, and harden the
 listener with settings the class has no parameter for:
 
@@ -147,8 +164,9 @@ for every parameter.
   `ca_crt.pem`, so a CA the service made for itself, or one made by hand,
   stays. Rebuilding a CA is a migration, not a Puppet run.
 - **Everything else in `puppet.conf` and `conf.d`.** Only the settings
-  listed above are managed, and each only when given. The JVM settings,
-  `auth.conf` rules and the rest are not managed yet (see the plan).
+  listed above are managed, and each only when given. `JAVA_ARGS` other
+  than the heap and code cache, `auth.conf` rules and the rest are not
+  managed yet (see the plan).
 
 ## Facts
 
@@ -177,8 +195,9 @@ The module ships one structured fact, `openvox_server`:
   `openvox9` there with a message saying so.
 - Requires OpenVox 8 or 9 on the server compiling the catalog, which is the
   host it manages.
-- Depends on puppetlabs/hocon and puppetlabs/inifile (which brings
-  puppetlabs/stdlib) for editing `ca.conf` and `puppet.conf` in place.
+- Depends on miharp/openvox_tune for the JVM and JRuby sizing, and on
+  puppetlabs/hocon and puppetlabs/inifile (which brings puppetlabs/stdlib)
+  for editing `ca.conf` and `puppet.conf` in place.
 
 ## Development
 

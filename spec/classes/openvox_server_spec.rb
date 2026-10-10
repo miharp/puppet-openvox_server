@@ -439,6 +439,59 @@ describe 'openvox_server' do
         it { is_expected.not_to contain_file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf') }
       end
 
+      context 'with tuning on a host without a server' do
+        let(:params) { { heap_mb: 4096 } }
+
+        it { is_expected.to compile.with_all_deps }
+        it { is_expected.to contain_class('openvox_server::tuning').that_requires('Class[openvox_server::install]') }
+        it { is_expected.not_to contain_class('openvox_tune') }
+      end
+
+      context 'with tuning on a host running the server' do
+        let(:server_state) do
+          super().merge('server_package' => 'openvox-server', 'version' => '8.17.0-1.el9', 'collection' => 'openvox8',
+                        'defaults_file' => '/etc/default/puppetserver', 'heap_mb' => 2048)
+        end
+        let(:facts) do
+          super().merge(openvox_tune: { 'memory_mb' => 16_384, 'defaults_file' => '/etc/default/puppetserver',
+                                        'java_args' => '-Xms2g -Xmx2g -Dfoo=bar', 'jruby_puppet' => {}, })
+        end
+        let(:params) { { max_active_instances: 7, heap_mb: 4096, reserved_code_cache_mb: 1024 } }
+
+        it { is_expected.to compile.with_all_deps }
+
+        it do
+          is_expected.to contain_class('openvox_tune')
+            .with_max_active_instances(7)
+            .with_heap_mb(4096)
+            .with_reserved_code_cache_mb(1024)
+            .with_restart(false)
+        end
+
+        it do
+          is_expected.to contain_augeas('openvox_tune JAVA_ARGS')
+            .with_changes('set JAVA_ARGS \'"-Xms4096m -Xmx4096m -Dfoo=bar -XX:ReservedCodeCacheSize=1024m"\'')
+            .that_notifies('Service[puppetserver]')
+        end
+
+        it do
+          is_expected.to contain_file('/etc/puppetlabs/puppetserver/conf.d/openvox_tune.conf')
+            .with_content(%r{max-active-instances: 7})
+            .that_notifies('Exec[openvox_server reload puppetserver]')
+        end
+
+        it { is_expected.not_to contain_exec('openvox_tune restart puppetserver') }
+        it { is_expected.to contain_class('openvox_server::service').that_requires('Class[openvox_server::tuning]') }
+      end
+
+      context 'with manage_tuning false' do
+        let(:server_state) { super().merge('server_package' => 'openvox-server', 'version' => '8.17.0-1.el9', 'collection' => 'openvox8') }
+        let(:params) { { manage_tuning: false, heap_mb: 4096 } }
+
+        it { is_expected.to compile.with_all_deps }
+        it { is_expected.not_to contain_class('openvox_tune') }
+      end
+
       context 'with manage_service false' do
         let(:params) { { manage_service: false, allow_auto_renewal: true } }
 

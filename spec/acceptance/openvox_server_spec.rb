@@ -123,6 +123,50 @@ describe 'openvox_server' do
     end
   end
 
+  context 'with JVM and JRuby sizing applied by the agent against its own server' do
+    # The real case for restart and reload: the server host's agent applies
+    # the catalog, the service restarts during the run, and the report still
+    # arrives because the restart blocks until the server serves again.
+    before(:all) do
+      shell('mkdir -p /etc/puppetlabs/code/environments/production/manifests')
+      create_remote_file(default, '/etc/puppetlabs/code/environments/production/manifests/site.pp', <<~PUPPET)
+        class { 'openvox_server':
+          max_active_instances   => 2,
+          heap_mb                => 1024,
+          reserved_code_cache_mb => 256,
+        }
+      PUPPET
+    end
+
+    after(:all) do
+      shell('rm -f /etc/puppetlabs/code/environments/production/manifests/site.pp')
+    end
+
+    it 'applies with changes and delivers the report' do
+      result = shell("/opt/puppetlabs/bin/puppet agent --test --server #{certname}", acceptable_exit_codes: [2])
+      expect(result.stdout).not_to match(%r{Could not send report})
+      expect(result.stdout).to match(%r{Service\[puppetserver\]})
+    end
+
+    it 'applies a second time without changes' do
+      shell("/opt/puppetlabs/bin/puppet agent --test --server #{certname}", acceptable_exit_codes: [0])
+    end
+
+    describe 'afterwards' do
+      it 'set the JVM arguments and the instance count' do
+        defaults = shell('cat /etc/default/puppetserver 2>/dev/null || cat /etc/sysconfig/puppetserver').stdout
+        expect(defaults).to match(%r{^JAVA_ARGS="-Xms1024m -Xmx1024m .*-XX:ReservedCodeCacheSize=256m"$})
+        expect(file('/etc/puppetlabs/puppetserver/conf.d/openvox_tune.conf').content).to match(%r{max-active-instances: 2})
+      end
+
+      it { expect(service('puppetserver')).to be_running }
+
+      it 'runs with the new heap' do
+        expect(shell('ps -o args= -p $(systemctl show -p MainPID --value puppetserver)').stdout).to match(%r{-Xmx1024m})
+      end
+    end
+  end
+
   context 'with an extra webserver setting' do
     it_behaves_like 'an idempotent resource' do
       let(:manifest) do

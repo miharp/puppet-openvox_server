@@ -17,6 +17,7 @@
 * `openvox_server::install`: Ensures openvox-server and the openvox-agent it requires
 * `openvox_server::repo`: Installs the collection's release package in place of other major versions'
 * `openvox_server::service`: Keeps the server service running, restarts it when the package changes, and reloads it on request
+* `openvox_server::tuning`: Applies the JVM and JRuby sizing through openvox_tune
 
 ### Functions
 
@@ -51,11 +52,17 @@ What a run does:
    so the CA is a root plus a 15-year intermediate rather than the single
    self-signed certificate the service makes for itself on first start
    (`manage_ca`).
-6. Keeps the `puppetserver` service running and enabled. The service is
-   restarted when the package, `webserver.conf` or `services.d/ca.cfg`
-   changes, and reloaded, which keeps the JVM and takes a few seconds,
-   when `puppet.conf` or `ca.conf` changes (`manage_service`). A reload
-   falls back to a restart where the service cannot be reloaded.
+6. Applies the JVM heap, reserved code cache and JRuby instance count it
+   is given, through [openvox_tune](https://forge.puppet.com/modules/miharp/openvox_tune),
+   whose `openvox_tune::tune` plan recommends them for the host. On a host
+   where the server is installed in the same run, they apply from the next
+   run (`manage_tuning`).
+7. Keeps the `puppetserver` service running and enabled. The service is
+   restarted when the package, `webserver.conf`, `services.d/ca.cfg` or
+   the JVM arguments change, and reloaded, which keeps the JVM and takes a
+   few seconds, when `puppet.conf`, `ca.conf` or the JRuby instance count
+   changes (`manage_service`). A reload falls back to a restart where the
+   service cannot be reloaded.
 
 Before that, it warns (and does nothing about it) when the host has less
 memory than 1.1 times the server's heap, below which the server refuses to
@@ -81,6 +88,16 @@ include openvox_server
 class { 'openvox_server':
   collection      => 'openvox9',
   package_version => 'latest',
+}
+```
+
+##### Sized for an 8 CPU, 16 GB host, from the openvox_tune::tune plan
+
+```puppet
+class { 'openvox_server':
+  max_active_instances   => 7,
+  heap_mb                => 4096,
+  reserved_code_cache_mb => 1024,
 }
 ```
 
@@ -113,6 +130,10 @@ The following parameters are available in the `openvox_server` class:
 * [`client_auth`](#-openvox_server--client_auth)
 * [`access_log_config`](#-openvox_server--access_log_config)
 * [`webserver_extra_settings`](#-openvox_server--webserver_extra_settings)
+* [`manage_tuning`](#-openvox_server--manage_tuning)
+* [`max_active_instances`](#-openvox_server--max_active_instances)
+* [`heap_mb`](#-openvox_server--heap_mb)
+* [`reserved_code_cache_mb`](#-openvox_server--reserved_code_cache_mb)
 * [`manage_ca`](#-openvox_server--manage_ca)
 * [`ca_name`](#-openvox_server--ca_name)
 * [`subject_alt_names`](#-openvox_server--subject_alt_names)
@@ -260,6 +281,44 @@ numbers and booleans are bare, arrays are lists. The settings the
 parameters above own cannot be given here.
 
 Default value: `{}`
+
+##### <a name="-openvox_server--manage_tuning"></a>`manage_tuning`
+
+Data type: `Boolean`
+
+Whether to apply `max_active_instances`, `heap_mb` and
+`reserved_code_cache_mb` through the openvox_tune class. Turn it off to
+declare that class yourself, or to size the server some other way.
+
+Default value: `true`
+
+##### <a name="-openvox_server--max_active_instances"></a>`max_active_instances`
+
+Data type: `Optional[Integer[1]]`
+
+JRuby instances, `jruby-puppet.max-active-instances`, set in
+`conf.d/openvox_tune.conf`. Unset, the file is removed and the server's
+default applies.
+
+Default value: `undef`
+
+##### <a name="-openvox_server--heap_mb"></a>`heap_mb`
+
+Data type: `Optional[Integer[512]]`
+
+JVM heap in MB, set as `-Xms` and `-Xmx` in `JAVA_ARGS`, keeping the
+other arguments. Unset, left as it is.
+
+Default value: `undef`
+
+##### <a name="-openvox_server--reserved_code_cache_mb"></a>`reserved_code_cache_mb`
+
+Data type: `Optional[Integer[32]]`
+
+JVM reserved code cache in MB, `-XX:ReservedCodeCacheSize` in
+`JAVA_ARGS`. Unset, left as it is.
+
+Default value: `undef`
 
 ##### <a name="-openvox_server--manage_ca"></a>`manage_ca`
 

@@ -29,6 +29,11 @@ Notable changes to openvox_server are recorded here. The format follows
   `autosign` and `ca_server` in the `[server]` section of `puppet.conf`,
   each only when given and without disturbing the rest of the file, through
   puppetlabs/hocon and puppetlabs/inifile, the module's two dependencies.
+- JVM and JRuby sizing (R12): `max_active_instances`, `heap_mb` and
+  `reserved_code_cache_mb` are applied through miharp/openvox_tune, the
+  module's third dependency, whose `openvox_tune::tune` plan recommends
+  them; a heap or code cache change restarts the service, an instance
+  count change reloads it.
 - `webserver.conf` and the service (R11, R15): `webserver.conf` is owned
   whole, with `ssl_host`, `ssl_port`, `client_auth`, `access_log_config` and
   `webserver_extra_settings` for any further `webserver` setting. The

@@ -1,7 +1,11 @@
 ---
 # puppet_fixtures symlinks the module under test from metadata.json.
+# augeas_core ships with the agent packages but not with the openvox gem,
+# and openvox_tune's class uses the augeas type.
 fixtures:
   repositories:
+    augeas_core: https://github.com/puppetlabs/puppetlabs-augeas_core.git
     hocon: https://github.com/puppetlabs/puppetlabs-hocon.git
     inifile: https://github.com/puppetlabs/puppetlabs-inifile.git
+    openvox_tune: https://github.com/miharp/puppet-openvox_tune.git
     stdlib: https://github.com/puppetlabs/puppetlabs-stdlib.git

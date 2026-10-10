@@ -13,6 +13,7 @@ Nothing manages an OpenVox Server from a Puppet run:
 | voxpupuli/puppet-openvox_bootstrap | Day-0 by design: get a node to a running agent or server once. |
 | miharp/ovadm | Bolt plans for install and upgrade. Writes config once, enforces nothing. |
 | control-repo `profile::openvox_server` | Package and version only; everything in `conf.d` is hand-edited. |
+| miharp/openvox_tune | Sizes the JVM and JRuby pool (plans recommend, a class applies) and nothing else; this module depends on it for R12 rather than doing it again. |
 
 Charlie Sharpsteen's ask (Slack, 2026-10-09): TLS termination "enforced by a
 module and covered by acceptance tests". The server-side acceptance test is
@@ -90,10 +91,13 @@ Numbered so acceptance tests and the README can cite them.
 
 - **R11** `webserver.conf`: `ssl_host`, `ssl_port`, `client_auth`, access
   log config. Owned whole.
-- **R12** JVM: `java_args` (or `heap_size` convenience) in
-  `/etc/default/puppetserver` or `/etc/sysconfig/puppetserver`;
-  `jruby_max_active_instances`, `max_requests_per_instance` and
-  `reserved_code_cache` in `puppetserver.conf`.
+- **R12** JVM and JRuby sizing through miharp/openvox_tune: `heap_mb` and
+  `reserved_code_cache_mb` in `JAVA_ARGS` of `/etc/default/puppetserver`
+  or `/etc/sysconfig/puppetserver` (the code cache is a JVM argument, not a
+  `puppetserver.conf` setting), `max_active_instances` in a `conf.d` file
+  of openvox_tune's own. Passed through as parameters; openvox_tune's own
+  restart is turned off and this module restarts or reloads.
+  `max_requests_per_instance` waits for a need.
 - **R13** `tls_termination => true`: `webserver.conf` becomes `host` and
   `port` (defaults `127.0.0.1` and `8141`), no `ssl-*` keys, and
   `authorization.allow-header-cert-info: true` in `auth.conf`. Only the
@@ -149,6 +153,11 @@ Stated in the README so the module is not judged against the Foreman class.
 
 Each needs a call before the milestone that depends on it.
 
+- **D0 Own modules.** Dependencies on the author's other modules
+  (openvox_tune, and later perhaps openvox_agent for the repo and package
+  logic copied in M1) are welcome; the family should compose. Puppet Labs
+  dependencies are tolerated where no own module does the job, and
+  replaced when that is cheap. Decided 2026-10-10.
 - **D1 Dependencies.** The agent module has none. The server module edits
   HOCON files in place for `auth.conf` (R14) and `ca.conf` (R9), and
   `puppet.conf` for R10. Options: (a) `puppetlabs/hocon` and
@@ -164,9 +173,11 @@ Each needs a call before the milestone that depends on it.
 - **D3 Name.** `openvox_server` mirrors the package name the way
   `openvoxdb` does. The Forge name becomes `puppet-openvox_server` on a
   transfer. Settled unless someone objects.
-- **D4 Reload versus restart (R15).** Needs a check of which config changes
-  `puppetserver reload` actually picks up on 8.x and 9.x. Verify on the lab
-  during M3.
+- **D4 Reload versus restart (R15).** Decided 2026-10-10 from the server
+  docs' restarting page and a beaker check: `conf.d` changes take a reload,
+  JVM arguments and `services.d` take a restart, and `puppet.conf` is read
+  by the fresh JRubies a reload starts (a request submitted after
+  `autosign` changed came back signed from the same JVM process).
 - **D5 Puppet 7 server migration (R4 scope).** Default: out of v1. Revisit
   if ovadm's upgrade plan proves it is a package swap plus the
   `puppet.conf` path restore and nothing else.
@@ -181,7 +192,7 @@ smaller; never fold a fix into a feature PR.
 | M0 | Repo scaffolded from vox_module_template, agent plumbing copied, empty class, CI green, this plan in `documentation/` | — | gha-puppet beaker job passes on an empty class |
 | M1 | R1, R2, R3, R5, R6, R16: install, repo, agent pin, fact, service running | D2 | Beaker standard install green on openvox9 and openvox8 |
 | M2 | R7, R9, R10: CA setup before first start, renewal settings, `[server]` settings | D1 | Beaker: fresh host ends with root + intermediate CA, agent runs against itself |
-| M3 | R11, R12, R15: webserver.conf, JVM, reload/restart behaviour | D4 | Unit coverage; lab check that heap and instance changes take effect |
+| M3 | R11, R12, R15: webserver.conf, JVM through openvox_tune, reload/restart behaviour | D4 | Unit coverage; beaker check that heap and instance changes take effect through the host's own agent run |
 | M4 | R13, R14: TLS termination | M2, M3 | Beaker nginx case green (ported from #701) |
 | M5 | R8: compiler mode | M2 | Lab: compiler bootstraps through the CA, agent gets a catalog from it |
 | M6 | R4, R21: 8 to 9 move, README, examples, REFERENCE, `0.1.0` on the Forge | M1–M5 | control-repo `profile::openvox_server` replaced by the module on the Hetzner lab; template example PR opened; Slack reply to Charlie with the link |
