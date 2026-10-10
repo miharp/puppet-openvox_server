@@ -8,65 +8,52 @@ Notable changes to openvox_server are recorded here. The format follows
 
 ### Added
 
-- Install and upgrade (R1, R2, R3, R5, R6, R16): the `openvox_server` class
-  manages the collection's release package and `openvox-agent` through
-  miharp/openvox_agent, told to act on server hosts, and ensures
-  `openvox-server` at a version (bare versions expanded per platform)
-  between the repository and the agent, so a move across a major carries
-  the agent along, and keeps the `puppetserver` service running and
-  restarted on package change. When openvox_agent leaves the host alone,
-  the server stays at its installed version too. The collection defaults to the installed server's, or the
-  applying agent's on a fresh host. `java_package` installs a JRE first for
-  pre-release testing. Warnings, not failures, for a held package, for a host
-  with less memory than 1.1 times the server's heap, and for a server whose
-  service runs a Java it does not support. A clear failure for `openvox9` on
-  Debian 12, where no OpenVox Server 9 package exists.
-- CA and settings (R7, R9, R10): the CA service is kept enabled in
-  `services.d/ca.cfg`, and before the service ever starts, when no CA exists,
-  `puppetserver ca setup` makes a root plus a 15-year intermediate instead of
-  the single self-signed certificate the service makes on first start
-  (`ca_name`, `subject_alt_names`). `allow_auto_renewal` and
-  `auto_renewal_cert_ttl` are set in `ca.conf`, and `dns_alt_names`,
-  `autosign` and `ca_server` in the `[server]` section of `puppet.conf`,
-  each only when given and without disturbing the rest of the file, through
-  puppetlabs/hocon and puppetlabs/inifile, the module's two dependencies.
-- JVM and JRuby sizing (R12): `max_active_instances`, `heap_mb` and
-  `reserved_code_cache_mb` are applied through miharp/openvox_tune, the
-  module's third dependency, whose `openvox_tune::tune` plan recommends
-  them; a heap or code cache change restarts the service, an instance
-  count change reloads it.
-- Compiler mode (R8): with `ca => false`, the CA service is disabled, the
-  server presents the certificate, key, CA bundle and CRL its own agent
-  holds from the CA (and makes them readable to the puppet user), and
-  `ca_server`, now written to the `[main]` section of `puppet.conf` rather
-  than `[server]`, is required. A CA the host already made for itself stops
-  the class rather than being removed. The `openvox_server` fact gains
-  `ca_crt_present`.
-- TLS termination (R13, R14): with `tls_termination`, the server listens on
-  plain HTTP on `host` and `port` (127.0.0.1:8141 by default) for a reverse
-  proxy that terminates TLS, and `authorization.allow-header-cert-info` is
-  set in `auth.conf` so the client's identity comes from the proxy's
-  `X-Client-*` headers; without it the setting is removed. The rest of
-  `auth.conf` is never touched. A warning when `host` is not a loopback
-  address. The proxy is not managed; the acceptance test stands up nginx
-  with the configuration from the server docs and checks catalogs with
-  trusted facts, certificate bootstrap, forged headers and CRL reload
-  through it.
-- `webserver.conf` and the service (R11, R15): `webserver.conf` is owned
-  whole, with `ssl_host`, `ssl_port`, `client_auth`, `access_log_config` and
-  `webserver_extra_settings` for any further `webserver` setting. The
-  service is restarted when the package, `webserver.conf` or
-  `services.d/ca.cfg` changes, and reloaded, keeping the JVM, when
-  `puppet.conf` or `ca.conf` changes, falling back to a restart where the
-  unit cannot be reloaded.
-- The `openvox_server` fact: server package and version, collection, held
-  server packages, the Java the service runs, the defaults file and its
-  heap, and whether the CA service and TLS termination are on.
-- The `openvox_server` class, empty for now, with the module's tooling: CI
-  through gha-puppet beaker on the `openvox9` collection, unit tests across
-  every supported platform, Forge release through gha-puppet, and the plan in
-  `documentation/plan.md`.
-- Debian 12 and 13, Ubuntu 22.04 and 24.04, and EL 8, 9 and 10 declared as
-  supported, matching the openvox-server package matrix.
+- The `openvox_server` class, which manages an OpenVox Server from a Puppet
+  run: the `openvox-server` package and the `openvox-agent` it requires, the
+  certificate authority, `webserver.conf`, the settings it is given in
+  `puppet.conf` and `ca.conf`, the JVM and JRuby sizing, TLS termination
+  behind a reverse proxy, compiler mode, and the `puppetserver` service.
+- Install and upgrade. The collection's release package and `openvox-agent`
+  come from [openvox_agent](https://forge.puppet.com/modules/miharp/openvox_agent),
+  and `openvox-server` is ordered between the repository and the agent, so a
+  move across a major version carries the agent along in one package
+  transaction. `collection` defaults to the installed server's, or to the
+  applying agent's on a fresh host; `package_version` and
+  `agent_package_version` take `present`, `latest` or a version, bare
+  versions expanded for the platform. Warnings, never failures, for a held
+  package, for a host with less memory than the server's heap needs, and for
+  a service pointed at a Java the installed server does not support.
+- The certificate authority. Before the service first starts, `puppetserver
+  ca setup` makes a root certificate plus a 15-year intermediate, named by
+  `ca_name` and `subject_alt_names`, instead of the single self-signed
+  certificate the service makes for itself. An existing CA is never touched.
+  `allow_auto_renewal` and `auto_renewal_cert_ttl` in `ca.conf`, and
+  `dns_alt_names` and `autosign` in `puppet.conf`, each set only when given
+  and without disturbing the rest of the file.
+- Compiler mode. With `ca => false` the CA service is disabled and the server
+  presents the certificate its own agent holds from the CA named by
+  `ca_server`. A host that already made a CA for itself is refused rather
+  than having it removed.
+- `webserver.conf`, owned whole: `ssl_host`, `ssl_port`, `client_auth`,
+  `access_log_config`, and `webserver_extra_settings` for any further
+  setting.
+- TLS termination. With `tls_termination` the server listens on plain HTTP on
+  `host` and `port` for a reverse proxy and takes the client's identity from
+  the headers the proxy sets; the proxy itself is not managed. A warning
+  when `host` is not a loopback address.
+- JVM and JRuby sizing through
+  [openvox_tune](https://forge.puppet.com/modules/miharp/openvox_tune):
+  `heap_mb`, `reserved_code_cache_mb` and `max_active_instances`, as its
+  `openvox_tune::tune` plan recommends them.
+- The service, kept running and enabled. Changes to the package,
+  `webserver.conf`, `services.d/ca.cfg` or the JVM arguments restart it;
+  changes to `puppet.conf`, `ca.conf`, `auth.conf` or the instance count
+  reload it, keeping the JVM.
+- The `openvox_server` fact: the server package and version, its collection,
+  held packages, the Java the service runs, the defaults file and its heap,
+  and whether the CA service and TLS termination are on.
+- Debian 12 and 13, Ubuntu 22.04 and 24.04, and EL 8, 9 and 10, on OpenVox 8
+  and 9. OpenVox Server 9 is not packaged for Debian 12, and the class says
+  so.
 
 [Unreleased]: https://github.com/miharp/puppet-openvox_server/commits/main
