@@ -62,10 +62,9 @@ Notable changes to openvox_server are recorded here. The format follows
 - The `openvox_server` fact: server package and version, collection, held
   server packages, the Java the service runs, the defaults file and its
   heap, and whether the CA service and TLS termination are on.
-- The `openvox_server` class, empty for now, with the module's tooling: CI
-  through gha-puppet beaker on the `openvox9` collection, unit tests across
-  every supported platform, Forge release through gha-puppet, and the plan in
-  `documentation/plan.md`.
+- The module's tooling: CI through gha-puppet beaker on every collection
+  metadata.json allows, unit tests across every supported platform, and Forge
+  release through gha-puppet.
 - Debian 12 and 13, Ubuntu 22.04 and 24.04, and EL 8, 9 and 10 declared as
   supported, matching the openvox-server package matrix.
 

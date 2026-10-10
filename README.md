@@ -4,12 +4,11 @@
 [![OpenVox compatible](https://img.shields.io/badge/OpenVox-8%20%7C%209-orange.svg)](https://voxpupuli.org/openvox/)
 [![License](https://img.shields.io/github/license/miharp/puppet-openvox_server)](https://github.com/miharp/puppet-openvox_server/blob/main/LICENSE)
 
-Manages OpenVox Server from a Puppet run: the `openvox-server` package, the
-`openvox-agent` it requires, and the `puppetserver` service. Its certificate
-authority, configuration files, JVM settings and TLS termination behind a
-reverse proxy follow milestone by milestone; the requirements, decisions and
-milestones are in [documentation/plan.md](documentation/plan.md). It is the
-server counterpart to
+Manages OpenVox Server from a Puppet run: the `openvox-server` package and
+the `openvox-agent` it requires, the certificate authority, `webserver.conf`
+and the settings in `puppet.conf` and `ca.conf`, the JVM and JRuby sizing,
+TLS termination behind a reverse proxy, compiler mode, and the
+`puppetserver` service. It is the server counterpart to
 [openvox_agent](https://forge.puppet.com/modules/miharp/openvox_agent).
 
 Assign the class to the host that runs your server. The agent on that host
@@ -213,7 +212,7 @@ for every parameter.
 - **Everything else in `puppet.conf` and `conf.d`.** Only the settings
   listed above are managed, and each only when given. `auth.conf` rules,
   `JAVA_ARGS` other than the heap and code cache, and the rest are not
-  managed yet (see the plan).
+  managed.
 
 ## Facts
 
