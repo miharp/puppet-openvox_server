@@ -15,9 +15,10 @@
 #   versionlock, which block an upgrade
 # Keys without a value are left out.
 #
-# - java: the Java the service runs, from the unit's ExecStart (the launcher
-#   that OpenVox Server 9 picks its Java with, or a fixed path), as path and
-#   major version. nil when no Java is found.
+# - java: the Java the service runs, as path and major version: JAVA_BIN from
+#   the defaults file for OpenVox Server 8, the Java the unit's ExecStart
+#   names for 9 (a fixed path, or the launcher that picks one). Left out when
+#   no Java is found.
 # - defaults_file: /etc/default/puppetserver or /etc/sysconfig/puppetserver
 # - heap_mb: the maximum heap from -Xmx in JAVA_ARGS of the defaults file;
 #   nil without an -Xmx
@@ -85,10 +86,12 @@ Facter.add(:openvox_server) do
                 end
     end
 
-    # The service's Java is the first word of ExecStart: /usr/bin/java for
-    # OpenVox Server 8, and for 9 either a fixed JRE path or the launcher
-    # script under /opt/puppetlabs, which prints the Java it picks (JAVA_BIN
-    # from the defaults file when set, else the newest supported JVM).
+    # The service's Java: OpenVox Server 8 units start the puppetserver
+    # script, which runs JAVA_BIN from the defaults file (/usr/bin/java by
+    # default); 9 units name the Java in ExecStart, either a fixed JRE path
+    # or the launcher script under /opt/puppetlabs, which prints the Java it
+    # picks (JAVA_BIN from the defaults file when set, else the newest
+    # supported JVM).
     service_java = lambda do
       unit = ['/etc/systemd/system/puppetserver.service',
               '/usr/lib/systemd/system/puppetserver.service',
@@ -96,11 +99,14 @@ Facter.add(:openvox_server) do
       return nil unless unit
 
       exec_start = File.readlines(unit).map(&:strip).find { |line| line.start_with?('ExecStart=') }
-      java_bin = exec_start && exec_start.sub('ExecStart=', '').sub(%r{\A[-@+!:]+}, '').split.first
-      return nil unless java_bin && File.executable?(java_bin)
+      return nil unless exec_start
+
+      java_bin = exec_start.sub('ExecStart=', '').sub(%r{\A[-@+!:]+}, '').split.first
+      java_bin = defaults.fetch('JAVA_BIN', '/usr/bin/java') unless File.basename(java_bin.to_s) == 'java'
+      return nil unless File.executable?(java_bin)
 
       if File.binread(java_bin, 2) == '#!'
-        java_bin_env = defaults['JAVA_BIN'].to_s.empty? ? '' : "JAVA_BIN='#{defaults['JAVA_BIN']}' "
+        java_bin_env = (defaults['JAVA_BIN'].to_s.empty? || defaults['JAVA_BIN'] == java_bin) ? '' : "JAVA_BIN='#{defaults['JAVA_BIN']}' "
         java_bin = execution.execute("#{java_bin_env}'#{java_bin}' 2>/dev/null", on_fail: '').strip
         return nil if java_bin.empty?
       end

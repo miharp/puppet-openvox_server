@@ -86,10 +86,10 @@ describe 'openvox_server fact' do
       allow(File).to receive(:readlines).with('/etc/dnf/plugins/versionlock.list').and_return(["# comment\n", "openvox-agent-0:8.29.0-1.el9.*\n"])
 
       allow(File).to receive(:readable?).with('/etc/sysconfig/puppetserver').and_return(true)
-      allow(File).to receive(:readlines).with('/etc/sysconfig/puppetserver').and_return(["JAVA_ARGS=\"-Xms512m -Xmx512m\"\n"])
+      allow(File).to receive(:readlines).with('/etc/sysconfig/puppetserver').and_return(["JAVA_BIN=\"/usr/bin/java\"\n", "JAVA_ARGS=\"-Xms512m -Xmx512m\"\n"])
 
       allow(File).to receive(:readable?).with(unit).and_return(true)
-      allow(File).to receive(:readlines).with(unit).and_return(["ExecStart=/usr/bin/java $JAVA_ARGS -cp x\n"])
+      allow(File).to receive(:readlines).with(unit).and_return(["Type=forking\n", "ExecStart=/opt/puppetlabs/server/apps/puppetserver/bin/puppetserver start\n"])
       allow(File).to receive(:executable?).with('/usr/bin/java').and_return(true)
       allow(File).to receive(:binread).with('/usr/bin/java', 2).and_return("\x7FE")
       allow(Facter::Core::Execution).to receive(:execute).with("'/usr/bin/java' -version 2>&1", on_fail: '')
@@ -105,7 +105,7 @@ describe 'openvox_server fact' do
       allow(File).to receive(:readlines).with("#{conf_dir}/conf.d/auth.conf").and_return(["authorization: {\n", "  allow-header-cert-info: true\n"])
     end
 
-    it 'reports the server, the versionlocked agent, an unsupported Java and the CA off' do
+    it 'reports the server, the versionlocked agent, the JAVA_BIN the start script runs and the CA off' do
       expect(fact).to eq(
         'server_package' => 'openvox-server',
         'version' => '8.8.1-1.el9',
