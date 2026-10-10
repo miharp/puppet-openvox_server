@@ -1,0 +1,21 @@
+# Kept out of the Forge tarball (puppet-modulebuilder reads this file).
+.devcontainer/
+.editorconfig
+.fixtures.yml
+.github/
+.gitignore
+.pmtignore
+.rspec
+.rubocop.yml
+.vendor/
+.yardoc/
+Gemfile
+Gemfile.lock
+Rakefile
+coverage/
+doc/
+junit/
+log/
+pkg/
+spec/
+vendor/

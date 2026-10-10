@@ -2,14 +2,20 @@
 
 source 'https://rubygems.org'
 
-# Puppet version can be pinned via the PUPPET_GEM_VERSION environment variable.
-# Example: PUPPET_GEM_VERSION='~> 8.0' bundle install
-gem 'puppet', ENV.fetch('PUPPET_GEM_VERSION', ['>= 8.0.0', '< 10.0.0'])
+group :test do
+  gem 'openvox', ENV.fetch('OPENVOX_GEM_VERSION', '~> 8.0'), require: false
+  gem 'puppet_metadata', '~> 6.0', require: false
+  gem 'voxpupuli-test', '~> 14.0', require: false
+end
 
-# voxpupuli-test bundles rspec-puppet, rspec-puppet-facts, facterdb, puppet-lint,
-# puppet-strings, and puppetlabs_spec_helper — matches the voxbox container.
-gem 'voxpupuli-test', '>= 13.0.0', require: false
+group :development do
+  gem 'openvox-strings', '~> 7.0', require: false
+end
 
-group :acceptance do
-  gem 'voxpupuli-acceptance', '>= 3.0.0', require: false
+group :system_tests do
+  gem 'voxpupuli-acceptance', '~> 4.4', require: false
+end
+
+group :release do
+  gem 'voxpupuli-release', '~> 5.4', require: false
 end

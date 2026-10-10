@@ -1,10 +1,31 @@
 # frozen_string_literal: true
 
-require 'puppetlabs_spec_helper/rake_tasks'
-require 'puppet-lint/tasks/puppet-lint'
-require 'puppet_strings/tasks'
+begin
+  require 'voxpupuli/test/rake'
+rescue LoadError
+  # voxpupuli-test is only available in the test gem group
+end
 
-PuppetLint.configuration.send('disable_140chars')
+# configure_beaker installs the module on the test host with its
+# dependencies resolved from metadata.json, so the beaker task needs no
+# fixtures:prep prerequisite (which would need a local puppet binary).
+begin
+  require 'voxpupuli/acceptance/rake'
+rescue LoadError
+  # voxpupuli-acceptance is only available in the system_tests gem group
+end
 
-# Default task runs validate → lint → spec in order.
-task default: %i[validate lint spec]
+begin
+  require 'puppet-strings/tasks'
+rescue LoadError
+  # openvox-strings is only available in the development gem group
+end
+
+begin
+  require 'voxpupuli/release/rake_tasks'
+rescue LoadError
+  # voxpupuli-release is only available in the release gem group
+else
+  GCGConfig.user = 'miharp'
+  GCGConfig.project = 'puppet-openvox_server'
+end
