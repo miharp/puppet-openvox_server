@@ -14,15 +14,27 @@
 #    agent of its own major, so the server goes first: moving it across a
 #    major moves the agent in the same package transaction, and the agent's
 #    own pin is applied after.
-# 3. Sets the `[server]` settings in `puppet.conf` and the renewal settings
+# 3. Owns `webserver.conf`: the address and port the server listens on,
+#    whether it asks clients for a certificate, the access log configuration,
+#    and any further `webserver` settings given (`manage_webserver`).
+# 4. Sets the `[server]` settings in `puppet.conf` and the renewal settings
 #    in `ca.conf` that are given, and leaves the rest of both files alone.
-# 4. Keeps the CA service enabled in `services.d/ca.cfg`, and before the
+# 5. Keeps the CA service enabled in `services.d/ca.cfg`, and before the
 #    service ever starts, when no CA exists yet, runs `puppetserver ca setup`
 #    so the CA is a root plus a 15-year intermediate rather than the single
 #    self-signed certificate the service makes for itself on first start
 #    (`manage_ca`).
-# 5. Keeps the `puppetserver` service running and enabled, and restarts it
-#    when the server package or its configuration changes (`manage_service`).
+# 6. Applies the JVM heap, reserved code cache and JRuby instance count it
+#    is given, through [openvox_tune](https://forge.puppet.com/modules/miharp/openvox_tune),
+#    whose `openvox_tune::tune` plan recommends them for the host. On a host
+#    where the server is installed in the same run, they apply from the next
+#    run (`manage_tuning`).
+# 7. Keeps the `puppetserver` service running and enabled. The service is
+#    restarted when the package, `webserver.conf`, `services.d/ca.cfg` or
+#    the JVM arguments change, and reloaded, which keeps the JVM and takes a
+#    few seconds, when `puppet.conf`, `ca.conf` or the JRuby instance count
+#    changes (`manage_service`). A reload falls back to a restart where the
+#    service cannot be reloaded.
 #
 # Before that, it warns (and does nothing about it) when the host has less
 # memory than 1.1 times the server's heap, below which the server refuses to
@@ -41,6 +53,13 @@
 #   class { 'openvox_server':
 #     collection      => 'openvox9',
 #     package_version => 'latest',
+#   }
+#
+# @example Sized for an 8 CPU, 16 GB host, from the openvox_tune::tune plan
+#   class { 'openvox_server':
+#     max_active_instances   => 7,
+#     heap_mb                => 4096,
+#     reserved_code_cache_mb => 1024,
 #   }
 #
 # @example A CA with a name of its own, renewing agent certificates
@@ -88,6 +107,51 @@
 #   A JRE package to install before the server. Not needed with released
 #   packages, which pull in a supported JRE; for pre-release testing where
 #   the server needs a Java the package does not yet require.
+#
+# @param manage_webserver
+#   Whether to own `webserver.conf`. Turn it off to manage the file some
+#   other way; `ssl_host`, `ssl_port`, `client_auth`, `access_log_config`
+#   and `webserver_extra_settings` then do nothing.
+#
+# @param ssl_host
+#   The address the server listens on, `webserver.ssl-host`.
+#
+# @param ssl_port
+#   The port the server listens on, `webserver.ssl-port`.
+#
+# @param client_auth
+#   `webserver.client-auth`: whether a connecting client is asked for a
+#   certificate (`want`, the default), must present one (`need`), or is not
+#   asked (`none`). Agents authenticate with their certificate, so `none`
+#   only makes sense behind a proxy that does.
+#
+# @param access_log_config
+#   `webserver.access-log-config`, the logback configuration of the request
+#   log; the package ships one.
+#
+# @param webserver_extra_settings
+#   Further `webserver` settings, by their HOCON name, such as
+#   `idle-timeout-milliseconds` or `ssl-protocols`. Strings are quoted,
+#   numbers and booleans are bare, arrays are lists. The settings the
+#   parameters above own cannot be given here.
+#
+# @param manage_tuning
+#   Whether to apply `max_active_instances`, `heap_mb` and
+#   `reserved_code_cache_mb` through the openvox_tune class. Turn it off to
+#   declare that class yourself, or to size the server some other way.
+#
+# @param max_active_instances
+#   JRuby instances, `jruby-puppet.max-active-instances`, set in
+#   `conf.d/openvox_tune.conf`. Unset, the file is removed and the server's
+#   default applies.
+#
+# @param heap_mb
+#   JVM heap in MB, set as `-Xms` and `-Xmx` in `JAVA_ARGS`, keeping the
+#   other arguments. Unset, left as it is.
+#
+# @param reserved_code_cache_mb
+#   JVM reserved code cache in MB, `-XX:ReservedCodeCacheSize` in
+#   `JAVA_ARGS`. Unset, left as it is.
 #
 # @param manage_ca
 #   Whether to keep the CA service enabled in `services.d/ca.cfg` and to set
@@ -149,6 +213,16 @@ class openvox_server (
   Pattern[/\Ahttps?:\/\/\S+[^\/]\z/]  $yum_source            = 'https://yum.voxpupuli.org',
   Boolean                             $manage_agent          = true,
   Optional[String[1]]                 $java_package          = undef,
+  Boolean                             $manage_webserver      = true,
+  String[1]                           $ssl_host              = '0.0.0.0',
+  Integer[1, 65535]                   $ssl_port              = 8140,
+  Enum['want', 'need', 'none']        $client_auth           = 'want',
+  Pattern[/\A\//]                     $access_log_config     = '/etc/puppetlabs/puppetserver/request-logging.xml',
+  Hash[String[1], Variant[String, Numeric, Boolean, Array[Variant[String, Numeric, Boolean]]]] $webserver_extra_settings = {},
+  Boolean                             $manage_tuning         = true,
+  Optional[Integer[1]]                $max_active_instances  = undef,
+  Optional[Integer[512]]              $heap_mb               = undef,
+  Optional[Integer[32]]               $reserved_code_cache_mb = undef,
   Boolean                             $manage_ca             = true,
   Optional[Pattern[/\A[^'"]+\z/]]     $ca_name               = undef,
   Optional[Array[String[1]]]          $subject_alt_names     = undef,
@@ -183,6 +257,12 @@ class openvox_server (
     }
   }
 
+  $owned_webserver_settings = ['ssl-host', 'ssl-port', 'client-auth', 'access-log-config']
+  $clashing = $webserver_extra_settings.keys.filter |$setting| { $setting in $owned_webserver_settings }
+  unless $clashing.empty {
+    fail("openvox_server: webserver_extra_settings cannot set ${clashing.join(', ')}; use the parameters for them.")
+  }
+
   if $resolved_collection =~ Undef {
     fail(@("MSG"/L))
       openvox_server: ${trusted['certname']} runs neither openvox-server nor openvox-agent, \
@@ -208,21 +288,23 @@ class openvox_server (
   }
 
   # OpenVox Server refuses to start when the host has less memory than 1.1
-  # times its maximum heap. The heap is -Xmx in JAVA_ARGS of the defaults
-  # file, or the packaged 2 GB before the package is installed. Without an
-  # -Xmx the JVM sizes the heap to the host, which always fits.
-  $heap_mb = $state['defaults_file'] ? {
-    Undef   => 2048,
-    default => $state['heap_mb'],
+  # times its maximum heap: the heap asked for, else -Xmx in JAVA_ARGS of the
+  # defaults file, else the packaged 2 GB before the package is installed.
+  # Without an -Xmx the JVM sizes the heap to the host, which always fits.
+  $checked_heap_mb = $heap_mb.lest || {
+    $state['defaults_file'] ? {
+      Undef   => 2048,
+      default => $state['heap_mb'],
+    }
   }
   $total_bytes = $facts.dig('memory', 'system', 'total_bytes')
-  if $heap_mb =~ Integer and $total_bytes =~ Integer and $total_bytes * 10 < $heap_mb * 1024 * 1024 * 11 {
+  if $checked_heap_mb =~ Integer and $total_bytes =~ Integer and $total_bytes * 10 < $checked_heap_mb * 1024 * 1024 * 11 {
     $total_mb = Integer($total_bytes / 1024 / 1024)
-    $need_mb = Integer(($heap_mb * 11 + 9) / 10)
+    $need_mb = Integer(($checked_heap_mb * 11 + 9) / 10)
     warning(@("MSG"/L))
       openvox_server: ${trusted['certname']} has ${total_mb} MB of memory, but OpenVox Server \
-      refuses to start with a ${heap_mb} MB heap on less than ${need_mb} MB (1.1 times the heap); \
-      lower -Xmx in JAVA_ARGS or use a host with more memory.
+      refuses to start with a ${checked_heap_mb} MB heap on less than ${need_mb} MB (1.1 times the heap); \
+      lower the heap or use a host with more memory.
       | MSG
   }
 
@@ -264,11 +346,20 @@ class openvox_server (
     Class['openvox_server::config'] -> Class['openvox_server::ca']
   }
 
+  if $manage_tuning {
+    contain openvox_server::tuning
+    Class['openvox_server::install'] -> Class['openvox_server::tuning']
+  }
+
+  # Configuration resources notify the service, or its reload, themselves.
   if $manage_service {
     contain openvox_server::service
-    Class['openvox_server::config'] ~> Class['openvox_server::service']
+    Class['openvox_server::config'] -> Class['openvox_server::service']
     if $manage_ca {
-      Class['openvox_server::ca'] ~> Class['openvox_server::service']
+      Class['openvox_server::ca'] -> Class['openvox_server::service']
+    }
+    if $manage_tuning {
+      Class['openvox_server::tuning'] -> Class['openvox_server::service']
     }
   }
 }

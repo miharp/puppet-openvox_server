@@ -16,9 +16,10 @@ describe 'openvox_server' do
     skip 'OpenVox Server 9 is not packaged for Debian 12' if debian12 && ENV.fetch('BEAKER_PUPPET_COLLECTION', 'openvox9') >= 'openvox9'
 
     # The server's certificate names the host's certname; the agent on the
-    # host reaches its server by that name.
+    # host, and the puppetserver ca CLI, reach the server by that name.
     certname = shell('/opt/puppetlabs/bin/puppet config print certname').stdout.strip
     shell("getent hosts #{certname} >/dev/null || echo '127.0.0.1 #{certname}' >> /etc/hosts")
+    shell("/opt/puppetlabs/bin/puppet config set --section main server #{certname}")
   end
 
   context 'with defaults' do
@@ -48,6 +49,11 @@ describe 'openvox_server' do
         expect(shell('grep -c "BEGIN CERTIFICATE" /etc/puppetlabs/puppetserver/ca/ca_crt.pem').stdout.strip).to eq('2')
         # ca setup names the CA after the host's fqdn, which keeps its case; certname is lowercased.
         expect(shell('openssl x509 -in /etc/puppetlabs/puppetserver/ca/ca_crt.pem -noout -subject').stdout).to match(%r{Puppet CA: #{Regexp.escape(certname)}}i)
+      end
+
+      it 'owns webserver.conf with the shipped values' do
+        content = file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf').content
+        expect(content).to match(%r{^    ssl-host: 0.0.0.0$}).and match(%r{^    ssl-port: 8140$}).and match(%r{^    client-auth: want$})
       end
 
       it 'keeps the CA service enabled' do
@@ -98,7 +104,89 @@ describe 'openvox_server' do
           .to match(%r{dns_alt_names = puppet,puppet.example.com}).and match(%r{autosign = true})
       end
 
+      it 'reloads the server so that it signs requests on its own' do
+        # The settings change reloaded, not restarted, the server: the JVM is
+        # the one from the first context. A fresh JRuby reads autosign = true,
+        # so a request from a scratch ssldir comes back signed.
+        pid_before = shell('cat /run/puppetlabs/puppetserver/puppetserver.pid 2>/dev/null || systemctl show -p MainPID --value puppetserver').stdout.strip
+        shell('rm -rf /tmp/scratch-ssl')
+        shell("/opt/puppetlabs/bin/puppet ssl submit_request --certname autosigned.example.com --ssldir /tmp/scratch-ssl --server #{certname} --waitforcert 0", acceptable_exit_codes: [0, 1])
+        expect(shell('/opt/puppetlabs/bin/puppetserver ca list --all').stdout).to match(%r{^\s*autosigned\.example\.com\s+\(SHA256\)})
+        expect(shell('/opt/puppetlabs/bin/puppetserver ca list').stdout).not_to match(%r{autosigned\.example\.com})
+        pid_after = shell('cat /run/puppetlabs/puppetserver/puppetserver.pid 2>/dev/null || systemctl show -p MainPID --value puppetserver').stdout.strip
+        expect(pid_after).to eq(pid_before)
+      end
+
       it 'still serves the agent on the host a catalog' do
+        shell("/opt/puppetlabs/bin/puppet agent --test --server #{certname}", acceptable_exit_codes: [0, 2])
+      end
+    end
+  end
+
+  context 'with JVM and JRuby sizing applied by the agent against its own server' do
+    # The real case for restart and reload: the server host's agent applies
+    # the catalog, the service restarts during the run, and the report still
+    # arrives because the restart blocks until the server serves again.
+    before(:all) do
+      # Beaker's session has a restrictive umask, so the directory and the
+      # file have to be made readable to the puppet user by hand.
+      shell('mkdir -p /etc/puppetlabs/code/environments/production/manifests && chmod 0755 /etc/puppetlabs/code/environments/production/manifests')
+      create_remote_file(default, '/etc/puppetlabs/code/environments/production/manifests/site.pp', <<~PUPPET)
+        class { 'openvox_server':
+          max_active_instances   => 2,
+          heap_mb                => 1024,
+          reserved_code_cache_mb => 256,
+        }
+      PUPPET
+      shell('chmod 0644 /etc/puppetlabs/code/environments/production/manifests/site.pp')
+    end
+
+    after(:all) do
+      shell('rm -f /etc/puppetlabs/code/environments/production/manifests/site.pp')
+    end
+
+    it 'applies with changes and delivers the report' do
+      result = shell("/opt/puppetlabs/bin/puppet agent --test --server #{certname}", acceptable_exit_codes: [2])
+      expect(result.stdout).not_to match(%r{Could not send report})
+      expect(result.stdout).to match(%r{Service\[puppetserver\]})
+    end
+
+    it 'applies a second time without changes' do
+      shell("/opt/puppetlabs/bin/puppet agent --test --server #{certname}", acceptable_exit_codes: [0])
+    end
+
+    describe 'afterwards' do
+      it 'set the JVM arguments and the instance count' do
+        defaults = shell('cat /etc/default/puppetserver 2>/dev/null || cat /etc/sysconfig/puppetserver').stdout
+        expect(defaults).to match(%r{^JAVA_ARGS="-Xms1024m -Xmx1024m .*-XX:ReservedCodeCacheSize=256m"$})
+        expect(file('/etc/puppetlabs/puppetserver/conf.d/openvox_tune.conf').content).to match(%r{max-active-instances: 2})
+      end
+
+      it { expect(service('puppetserver')).to be_running }
+
+      it 'runs with the new heap' do
+        expect(shell('ps -o args= -p $(systemctl show -p MainPID --value puppetserver)').stdout).to match(%r{-Xmx1024m})
+      end
+    end
+  end
+
+  context 'with an extra webserver setting' do
+    it_behaves_like 'an idempotent resource' do
+      let(:manifest) do
+        <<~PUPPET
+          class { 'openvox_server':
+            webserver_extra_settings => { 'idle-timeout-milliseconds' => 60000 },
+          }
+        PUPPET
+      end
+    end
+
+    describe 'afterwards' do
+      it { expect(file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf').content).to match(%r{^    idle-timeout-milliseconds: 60000$}) }
+      it { expect(service('puppetserver')).to be_running }
+      it { expect(port(8140)).to be_listening }
+
+      it 'restarted the server and still serves the agent on the host a catalog' do
         shell("/opt/puppetlabs/bin/puppet agent --test --server #{certname}", acceptable_exit_codes: [0, 2])
       end
     end

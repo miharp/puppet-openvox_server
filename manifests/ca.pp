@@ -11,9 +11,17 @@
 class openvox_server::ca {
   $confdir = '/etc/puppetlabs/puppetserver'
 
+  # Enabling or disabling the CA service takes a restart: services.d is the
+  # bootstrap configuration, which a reload does not re-read.
+  $restart = $openvox_server::manage_service ? {
+    true    => Service[$openvox_server::service_name],
+    default => undef,
+  }
+
   file { "${confdir}/services.d/ca.cfg":
     ensure  => file,
     content => epp('openvox_server/ca.cfg.epp', { 'ca_enabled' => true }),
+    notify  => $restart,
   }
 
   $setup_options = [

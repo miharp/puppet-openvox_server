@@ -15,6 +15,10 @@
   ],
   "dependencies": [
     {
+      "name": "miharp/openvox_tune",
+      "version_requirement": ">= 0.1.0 < 1.0.0"
+    },
+    {
       "name": "puppetlabs/hocon",
       "version_requirement": ">= 2.0.0 < 3.0.0"
     },

@@ -13,13 +13,15 @@
 #### Private Classes
 
 * `openvox_server::ca`: Keeps the CA service enabled and sets the CA up before the first start
-* `openvox_server::config`: Sets the puppet.conf [server] and ca.conf settings that are given
+* `openvox_server::config`: Owns webserver.conf and sets the puppet.conf [server] and ca.conf settings that are given
 * `openvox_server::install`: Ensures openvox-server and the openvox-agent it requires
 * `openvox_server::repo`: Installs the collection's release package in place of other major versions'
-* `openvox_server::service`: Keeps the server service running and restarts it when the package changes
+* `openvox_server::service`: Keeps the server service running, restarts it when the package changes, and reloads it on request
+* `openvox_server::tuning`: Applies the JVM and JRuby sizing through openvox_tune
 
 ### Functions
 
+* [`openvox_server::hocon_value`](#openvox_server--hocon_value): Renders a value as a HOCON literal
 * [`openvox_server::package_version`](#openvox_server--package_version): Expands a bare version to the platform's package version
 
 ## Classes
@@ -40,15 +42,27 @@ What a run does:
    agent of its own major, so the server goes first: moving it across a
    major moves the agent in the same package transaction, and the agent's
    own pin is applied after.
-3. Sets the `[server]` settings in `puppet.conf` and the renewal settings
+3. Owns `webserver.conf`: the address and port the server listens on,
+   whether it asks clients for a certificate, the access log configuration,
+   and any further `webserver` settings given (`manage_webserver`).
+4. Sets the `[server]` settings in `puppet.conf` and the renewal settings
    in `ca.conf` that are given, and leaves the rest of both files alone.
-4. Keeps the CA service enabled in `services.d/ca.cfg`, and before the
+5. Keeps the CA service enabled in `services.d/ca.cfg`, and before the
    service ever starts, when no CA exists yet, runs `puppetserver ca setup`
    so the CA is a root plus a 15-year intermediate rather than the single
    self-signed certificate the service makes for itself on first start
    (`manage_ca`).
-5. Keeps the `puppetserver` service running and enabled, and restarts it
-   when the server package or its configuration changes (`manage_service`).
+6. Applies the JVM heap, reserved code cache and JRuby instance count it
+   is given, through [openvox_tune](https://forge.puppet.com/modules/miharp/openvox_tune),
+   whose `openvox_tune::tune` plan recommends them for the host. On a host
+   where the server is installed in the same run, they apply from the next
+   run (`manage_tuning`).
+7. Keeps the `puppetserver` service running and enabled. The service is
+   restarted when the package, `webserver.conf`, `services.d/ca.cfg` or
+   the JVM arguments change, and reloaded, which keeps the JVM and takes a
+   few seconds, when `puppet.conf`, `ca.conf` or the JRuby instance count
+   changes (`manage_service`). A reload falls back to a restart where the
+   service cannot be reloaded.
 
 Before that, it warns (and does nothing about it) when the host has less
 memory than 1.1 times the server's heap, below which the server refuses to
@@ -77,6 +91,16 @@ class { 'openvox_server':
 }
 ```
 
+##### Sized for an 8 CPU, 16 GB host, from the openvox_tune::tune plan
+
+```puppet
+class { 'openvox_server':
+  max_active_instances   => 7,
+  heap_mb                => 4096,
+  reserved_code_cache_mb => 1024,
+}
+```
+
 ##### A CA with a name of its own, renewing agent certificates
 
 ```puppet
@@ -100,6 +124,16 @@ The following parameters are available in the `openvox_server` class:
 * [`yum_source`](#-openvox_server--yum_source)
 * [`manage_agent`](#-openvox_server--manage_agent)
 * [`java_package`](#-openvox_server--java_package)
+* [`manage_webserver`](#-openvox_server--manage_webserver)
+* [`ssl_host`](#-openvox_server--ssl_host)
+* [`ssl_port`](#-openvox_server--ssl_port)
+* [`client_auth`](#-openvox_server--client_auth)
+* [`access_log_config`](#-openvox_server--access_log_config)
+* [`webserver_extra_settings`](#-openvox_server--webserver_extra_settings)
+* [`manage_tuning`](#-openvox_server--manage_tuning)
+* [`max_active_instances`](#-openvox_server--max_active_instances)
+* [`heap_mb`](#-openvox_server--heap_mb)
+* [`reserved_code_cache_mb`](#-openvox_server--reserved_code_cache_mb)
 * [`manage_ca`](#-openvox_server--manage_ca)
 * [`ca_name`](#-openvox_server--ca_name)
 * [`subject_alt_names`](#-openvox_server--subject_alt_names)
@@ -188,6 +222,101 @@ Data type: `Optional[String[1]]`
 A JRE package to install before the server. Not needed with released
 packages, which pull in a supported JRE; for pre-release testing where
 the server needs a Java the package does not yet require.
+
+Default value: `undef`
+
+##### <a name="-openvox_server--manage_webserver"></a>`manage_webserver`
+
+Data type: `Boolean`
+
+Whether to own `webserver.conf`. Turn it off to manage the file some
+other way; `ssl_host`, `ssl_port`, `client_auth`, `access_log_config`
+and `webserver_extra_settings` then do nothing.
+
+Default value: `true`
+
+##### <a name="-openvox_server--ssl_host"></a>`ssl_host`
+
+Data type: `String[1]`
+
+The address the server listens on, `webserver.ssl-host`.
+
+Default value: `'0.0.0.0'`
+
+##### <a name="-openvox_server--ssl_port"></a>`ssl_port`
+
+Data type: `Integer[1, 65535]`
+
+The port the server listens on, `webserver.ssl-port`.
+
+Default value: `8140`
+
+##### <a name="-openvox_server--client_auth"></a>`client_auth`
+
+Data type: `Enum['want', 'need', 'none']`
+
+`webserver.client-auth`: whether a connecting client is asked for a
+certificate (`want`, the default), must present one (`need`), or is not
+asked (`none`). Agents authenticate with their certificate, so `none`
+only makes sense behind a proxy that does.
+
+Default value: `'want'`
+
+##### <a name="-openvox_server--access_log_config"></a>`access_log_config`
+
+Data type: `Pattern[/\A\//]`
+
+`webserver.access-log-config`, the logback configuration of the request
+log; the package ships one.
+
+Default value: `'/etc/puppetlabs/puppetserver/request-logging.xml'`
+
+##### <a name="-openvox_server--webserver_extra_settings"></a>`webserver_extra_settings`
+
+Data type: `Hash[String[1], Variant[String, Numeric, Boolean, Array[Variant[String, Numeric, Boolean]]]]`
+
+Further `webserver` settings, by their HOCON name, such as
+`idle-timeout-milliseconds` or `ssl-protocols`. Strings are quoted,
+numbers and booleans are bare, arrays are lists. The settings the
+parameters above own cannot be given here.
+
+Default value: `{}`
+
+##### <a name="-openvox_server--manage_tuning"></a>`manage_tuning`
+
+Data type: `Boolean`
+
+Whether to apply `max_active_instances`, `heap_mb` and
+`reserved_code_cache_mb` through the openvox_tune class. Turn it off to
+declare that class yourself, or to size the server some other way.
+
+Default value: `true`
+
+##### <a name="-openvox_server--max_active_instances"></a>`max_active_instances`
+
+Data type: `Optional[Integer[1]]`
+
+JRuby instances, `jruby-puppet.max-active-instances`, set in
+`conf.d/openvox_tune.conf`. Unset, the file is removed and the server's
+default applies.
+
+Default value: `undef`
+
+##### <a name="-openvox_server--heap_mb"></a>`heap_mb`
+
+Data type: `Optional[Integer[512]]`
+
+JVM heap in MB, set as `-Xms` and `-Xmx` in `JAVA_ARGS`, keeping the
+other arguments. Unset, left as it is.
+
+Default value: `undef`
+
+##### <a name="-openvox_server--reserved_code_cache_mb"></a>`reserved_code_cache_mb`
+
+Data type: `Optional[Integer[32]]`
+
+JVM reserved code cache in MB, `-XX:ReservedCodeCacheSize` in
+`JAVA_ARGS`. Unset, left as it is.
 
 Default value: `undef`
 
@@ -303,6 +432,26 @@ Whether the service starts at boot.
 Default value: `true`
 
 ## Functions
+
+### <a name="openvox_server--hocon_value"></a>`openvox_server::hocon_value`
+
+Type: Puppet Language
+
+Strings are quoted, with backslashes and double quotes escaped; numbers
+and booleans are bare; arrays are rendered element by element.
+
+#### `openvox_server::hocon_value(Variant[String, Numeric, Boolean, Array[Variant[String, Numeric, Boolean]]] $value)`
+
+Strings are quoted, with backslashes and double quotes escaped; numbers
+and booleans are bare; arrays are rendered element by element.
+
+Returns: `String` The HOCON literal.
+
+##### `value`
+
+Data type: `Variant[String, Numeric, Boolean, Array[Variant[String, Numeric, Boolean]]]`
+
+The value to render.
 
 ### <a name="openvox_server--package_version"></a>`openvox_server::package_version`
 
