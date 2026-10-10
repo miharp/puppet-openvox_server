@@ -1,4 +1,5 @@
-<%- | Boolean $tls_termination,
+<%- | Hash[String[1], String[1]] $agent_ssl,
+      Boolean $tls_termination,
       String[1] $host,
       Integer[1, 65535] $port,
       String[1] $ssl_host,
@@ -18,6 +19,9 @@ webserver: {
     client-auth: <%= $client_auth %>
     ssl-host: <%= $ssl_host %>
     ssl-port: <%= $ssl_port %>
+<% $agent_ssl.each |$setting, $path| { -%>
+    <%= $setting %>: <%= $path %>
+<% } -%>
 <% } -%>
 <% $extra_settings.keys.sort.each |$setting| { -%>
     <%= $setting %>: <%= openvox_server::hocon_value($extra_settings[$setting]) %>

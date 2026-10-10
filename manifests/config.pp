@@ -24,10 +24,56 @@ class openvox_server::config {
     default => undef,
   }
 
+  # A compiler presents the certificate its agent holds from the CA. The
+  # agent made those files as root before the puppet user existed; the
+  # server runs as that user, and Puppet itself gives the files to it on the
+  # next agent run, so give them now.
+  $compiler = $openvox_server::manage_ca and !$openvox_server::ca
+  $ssldir = '/etc/puppetlabs/puppet/ssl'
+  $certname = $trusted['certname']
+  $agent_ssl = $compiler ? {
+    true    => {
+      'ssl-cert'     => "${ssldir}/certs/${certname}.pem",
+      'ssl-key'      => "${ssldir}/private_keys/${certname}.pem",
+      'ssl-ca-cert'  => "${ssldir}/certs/ca.pem",
+      'ssl-crl-path' => "${ssldir}/crl.pem",
+    },
+    default => {},
+  }
+
+  if $compiler {
+    file { [$ssldir, "${ssldir}/certs", "${ssldir}/private_keys"]:
+      ensure  => directory,
+      owner   => 'puppet',
+      group   => 'puppet',
+      require => Package['openvox-server'],
+      before  => $restart,
+    }
+
+    file { ["${ssldir}/certs/${certname}.pem", "${ssldir}/certs/ca.pem", "${ssldir}/crl.pem"]:
+      ensure  => file,
+      owner   => 'puppet',
+      group   => 'puppet',
+      mode    => '0644',
+      require => Package['openvox-server'],
+      before  => $restart,
+    }
+
+    file { "${ssldir}/private_keys/${certname}.pem":
+      ensure  => file,
+      owner   => 'puppet',
+      group   => 'puppet',
+      mode    => '0640',
+      require => Package['openvox-server'],
+      before  => $restart,
+    }
+  }
+
   if $openvox_server::manage_webserver {
     file { "${confdir}/conf.d/webserver.conf":
       ensure  => file,
       content => epp('openvox_server/webserver.conf.epp', {
+        'agent_ssl'         => $agent_ssl,
         'tls_termination'   => $openvox_server::tls_termination,
         'host'              => $openvox_server::host,
         'port'              => $openvox_server::port,
@@ -41,26 +87,34 @@ class openvox_server::config {
     }
   }
 
-  $server_settings = {
-    'dns_alt_names' => $openvox_server::dns_alt_names ? {
-      Undef   => undef,
-      default => $openvox_server::dns_alt_names.join(','),
+  # [server] settings are the server's own; ca_server goes in [main], since
+  # the host's agent is what renews the certificate and fetches the CRL.
+  $puppet_settings = {
+    'server' => {
+      'dns_alt_names' => $openvox_server::dns_alt_names ? {
+        Undef   => undef,
+        default => $openvox_server::dns_alt_names.join(','),
+      },
+      'autosign'      => $openvox_server::autosign ? {
+        Boolean => String($openvox_server::autosign),
+        default => $openvox_server::autosign,
+      },
     },
-    'autosign'      => $openvox_server::autosign ? {
-      Boolean => String($openvox_server::autosign),
-      default => $openvox_server::autosign,
+    'main'   => {
+      'ca_server' => $openvox_server::ca_server,
     },
-    'ca_server'     => $openvox_server::ca_server,
-  }.filter |$setting, $value| { $value =~ NotUndef }
+  }
 
-  $server_settings.each |$setting, $value| {
-    ini_setting { "openvox_server puppet.conf server ${setting}":
-      ensure  => present,
-      path    => $puppet_conf,
-      section => 'server',
-      setting => $setting,
-      value   => $value,
-      notify  => $reload,
+  $puppet_settings.each |$section, $settings| {
+    $settings.filter |$setting, $value| { $value =~ NotUndef }.each |$setting, $value| {
+      ini_setting { "openvox_server puppet.conf ${section} ${setting}":
+        ensure  => present,
+        path    => $puppet_conf,
+        section => $section,
+        setting => $setting,
+        value   => $value,
+        notify  => $reload,
+      }
     }
   }
 

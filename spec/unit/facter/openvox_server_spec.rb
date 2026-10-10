@@ -14,6 +14,8 @@ describe 'openvox_server fact' do
     allow(File).to receive(:readable?).and_call_original
     allow(File).to receive(:readable?).with(%r{puppetserver}).and_return(false)
     allow(File).to receive(:readable?).with(%r{versionlock}).and_return(false)
+    allow(File).to receive(:exist?).and_call_original
+    allow(File).to receive(:exist?).with('/etc/puppetlabs/puppetserver/ca/ca_crt.pem').and_return(false)
   end
 
   after { Facter.clear }
@@ -30,6 +32,7 @@ describe 'openvox_server fact' do
         openvoxdb un
       DPKG
       allow(Facter::Core::Execution).to receive(:execute).with('apt-mark showhold', on_fail: '').and_return("openvox-server\ncurl\n")
+      allow(File).to receive(:exist?).with('/etc/puppetlabs/puppetserver/ca/ca_crt.pem').and_return(true)
 
       allow(File).to receive(:readable?).with('/etc/default/puppetserver').and_return(true)
       allow(File).to receive(:readlines).with('/etc/default/puppetserver').and_return([
@@ -69,6 +72,7 @@ describe 'openvox_server fact' do
         'defaults_file' => '/etc/default/puppetserver',
         'heap_mb' => 3072,
         'ca_enabled' => true,
+        'ca_crt_present' => true,
         'tls_termination' => false,
       )
     end
@@ -113,6 +117,7 @@ describe 'openvox_server fact' do
         'defaults_file' => '/etc/sysconfig/puppetserver',
         'heap_mb' => 512,
         'ca_enabled' => false,
+        'ca_crt_present' => false,
         'tls_termination' => true,
       )
     end
@@ -127,7 +132,7 @@ describe 'openvox_server fact' do
     end
 
     it 'leaves the server keys out' do
-      expect(fact).to eq('held_packages' => [])
+      expect(fact).to eq('held_packages' => [], 'ca_crt_present' => false)
     end
   end
 

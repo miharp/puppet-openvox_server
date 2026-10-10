@@ -13,7 +13,7 @@
 #### Private Classes
 
 * `openvox_server::agent`: Manages the repository and openvox-agent through openvox_agent
-* `openvox_server::ca`: Keeps the CA service enabled and sets the CA up before the first start
+* `openvox_server::ca`: Enables or disables the CA service, and sets the CA up before the first start
 * `openvox_server::config`: Owns webserver.conf and sets the puppet.conf [server] and ca.conf settings that are given
 * `openvox_server::install`: Ensures openvox-server
 * `openvox_server::service`: Keeps the server service running, restarts it when the package changes, and reloads it on request
@@ -60,7 +60,9 @@ What a run does:
    service ever starts, when no CA exists yet, runs `puppetserver ca setup`
    so the CA is a root plus a 15-year intermediate rather than the single
    self-signed certificate the service makes for itself on first start
-   (`manage_ca`).
+   (`manage_ca`). With `ca => false` the host is a compiler: the CA
+   service is disabled, the server presents the certificate its own agent
+   holds from the CA, and `ca_server` names the CA.
 6. Applies the JVM heap, reserved code cache and JRuby instance count it
    is given, through [openvox_tune](https://forge.puppet.com/modules/miharp/openvox_tune),
    whose `openvox_tune::tune` plan recommends them for the host. On a host
@@ -110,6 +112,15 @@ class { 'openvox_server':
 }
 ```
 
+##### A compiler, whose agent already holds a certificate from the CA
+
+```puppet
+class { 'openvox_server':
+  ca        => false,
+  ca_server => 'puppet.example.com',
+}
+```
+
 ##### Behind a reverse proxy that terminates TLS on this host
 
 ```puppet
@@ -155,6 +166,7 @@ The following parameters are available in the `openvox_server` class:
 * [`heap_mb`](#-openvox_server--heap_mb)
 * [`reserved_code_cache_mb`](#-openvox_server--reserved_code_cache_mb)
 * [`manage_ca`](#-openvox_server--manage_ca)
+* [`ca`](#-openvox_server--ca)
 * [`ca_name`](#-openvox_server--ca_name)
 * [`subject_alt_names`](#-openvox_server--subject_alt_names)
 * [`allow_auto_renewal`](#-openvox_server--allow_auto_renewal)
@@ -380,9 +392,22 @@ Default value: `undef`
 
 Data type: `Boolean`
 
-Whether to keep the CA service enabled in `services.d/ca.cfg` and to set
-the CA up with `puppetserver ca setup` before the first start. An existing
-CA is never touched.
+Whether to manage `services.d/ca.cfg` and the CA at all. Off, `ca` does
+nothing and an existing CA is never touched.
+
+Default value: `true`
+
+##### <a name="-openvox_server--ca"></a>`ca`
+
+Data type: `Boolean`
+
+Whether this server is the certificate authority. On (the default), the
+CA service is enabled and set up before the first start. Off, the host
+is a compiler: the CA service is disabled, the server presents the
+certificate, key, CA bundle and CRL its own agent holds from the CA, and
+`ca_server` is required. The agent must have its certificate before this
+class runs, so there is nothing to bootstrap. A CA that this host has
+already made for itself stops the class rather than being removed.
 
 Default value: `true`
 
@@ -449,8 +474,10 @@ Default value: `undef`
 
 Data type: `Optional[String[1]]`
 
-`ca_server` in `[server]`: the CA this server sends certificate requests
-to, for a compiler. When unset, left as it is.
+`ca_server` in the `[main]` section of `puppet.conf`: the CA every
+Puppet process on this host sends certificate requests to, so that a
+compiler's agent renews its certificate and fetches the CRL from the CA.
+Required with `ca => false`. When unset, left as it is.
 
 Default value: `undef`
 

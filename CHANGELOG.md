@@ -35,6 +35,13 @@ Notable changes to openvox_server are recorded here. The format follows
   module's third dependency, whose `openvox_tune::tune` plan recommends
   them; a heap or code cache change restarts the service, an instance
   count change reloads it.
+- Compiler mode (R8): with `ca => false`, the CA service is disabled, the
+  server presents the certificate, key, CA bundle and CRL its own agent
+  holds from the CA (and makes them readable to the puppet user), and
+  `ca_server`, now written to the `[main]` section of `puppet.conf` rather
+  than `[server]`, is required. A CA the host already made for itself stops
+  the class rather than being removed. The `openvox_server` fact gains
+  `ca_crt_present`.
 - TLS termination (R13, R14): with `tls_termination`, the server listens on
   plain HTTP on `host` and `port` (127.0.0.1:8141 by default) for a reverse
   proxy that terminates TLS, and `authorization.allow-header-cert-info` is

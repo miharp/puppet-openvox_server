@@ -60,6 +60,9 @@ include openvox_server
    Left to its first start, the service makes a single self-signed CA
    certificate that expires with `ca_ttl`, five years by default. An
    existing CA is never touched.
+   With `ca => false` the host is a compiler instead: the CA service is
+   disabled, the server presents the certificate its own agent holds from
+   the CA, and `ca_server` names the CA.
 7. **Keeps the service running** and enabled. It is restarted when the
    package, `webserver.conf`, `services.d/ca.cfg` or the JVM arguments
    change, and reloaded, which keeps the JVM and takes a few seconds, when
@@ -126,6 +129,20 @@ class { 'openvox_server':
 }
 ```
 
+Add a compiler. Its agent must already hold a certificate from the CA, with
+the DNS alt names agents will reach it by, and nothing else is bootstrapped:
+the server presents that certificate and never acts as a CA. `ca_server`
+goes into the `[main]` section of `puppet.conf`, so the compiler's own agent
+renews its certificate and fetches the CRL from the CA; agents that use the
+compiler need `ca_server` set the same way.
+
+```puppet
+class { 'openvox_server':
+  ca        => false,
+  ca_server => 'puppet.example.com',
+}
+```
+
 Put the server behind a reverse proxy that terminates TLS on the same host.
 The server moves to plain HTTP on 127.0.0.1:8141 and trusts the
 `X-Client-Verify`, `X-Client-DN` and `X-Client-Cert` headers the proxy sets;
@@ -186,6 +203,10 @@ for every parameter.
 - **An existing CA.** `puppetserver ca setup` only runs when there is no
   `ca_crt.pem`, so a CA the service made for itself, or one made by hand,
   stays. Rebuilding a CA is a migration, not a Puppet run.
+- **A CA on a host that is to become a compiler.** `ca => false` stops with
+  a message when `ca_crt.pem` exists in the CA directory, rather than
+  removing a CA that may have signed agents. Move the directory away
+  yourself if the host was never the CA.
 - **The reverse proxy.** The class makes the server fit for one and
   nothing more. The proxy needs reloads when the CRL or the server
   certificate changes, which a class for nginx owns naturally.
