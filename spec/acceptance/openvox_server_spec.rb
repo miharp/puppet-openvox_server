@@ -138,6 +138,7 @@ describe 'openvox_server' do
           reserved_code_cache_mb => 256,
         }
       PUPPET
+      shell('chmod 0644 /etc/puppetlabs/code/environments/production/manifests/site.pp')
     end
 
     after(:all) do
