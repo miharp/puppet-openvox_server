@@ -35,6 +35,16 @@ Notable changes to openvox_server are recorded here. The format follows
   module's third dependency, whose `openvox_tune::tune` plan recommends
   them; a heap or code cache change restarts the service, an instance
   count change reloads it.
+- TLS termination (R13, R14): with `tls_termination`, the server listens on
+  plain HTTP on `host` and `port` (127.0.0.1:8141 by default) for a reverse
+  proxy that terminates TLS, and `authorization.allow-header-cert-info` is
+  set in `auth.conf` so the client's identity comes from the proxy's
+  `X-Client-*` headers; without it the setting is removed. The rest of
+  `auth.conf` is never touched. A warning when `host` is not a loopback
+  address. The proxy is not managed; the acceptance test stands up nginx
+  with the configuration from the server docs and checks catalogs with
+  trusted facts, certificate bootstrap, forged headers and CRL reload
+  through it.
 - `webserver.conf` and the service (R11, R15): `webserver.conf` is owned
   whole, with `ssl_host`, `ssl_port`, `client_auth`, `access_log_config` and
   `webserver_extra_settings` for any further `webserver` setting. The

@@ -190,4 +190,123 @@ describe 'openvox_server' do
       end
     end
   end
+
+  context 'with TLS termination behind nginx' do
+    # Ported from openvox-server's acceptance test for TLS termination: nginx
+    # on 8140 verifies agent certificates and passes them to the server,
+    # listening on plain HTTP on 127.0.0.1:8141, in X-Client-* headers.
+    let(:bootstrap_certname) { 'tls-termination-bootstrap.test' }
+    let(:bootstrap_agent) do
+      "/opt/puppetlabs/bin/puppet agent --test --noop --waitforcert 0 --server #{certname} " \
+        "--certname #{bootstrap_certname} --confdir /tmp/tls-bootstrap --vardir /tmp/tls-bootstrap/var"
+    end
+
+    it_behaves_like 'an idempotent resource' do
+      let(:manifest) { "class { 'openvox_server': tls_termination => true }" }
+    end
+
+    describe 'the server' do
+      it 'listens on plain HTTP on the loopback address only' do
+        expect(shell('curl -sf -o /dev/null http://127.0.0.1:8141/status/v1/simple').exit_code).to eq(0)
+        address = shell('/opt/puppetlabs/bin/facter networking.ip').stdout.strip
+        expect(shell("curl -s -o /dev/null --max-time 5 http://#{address}:8141/status/v1/simple", acceptable_exit_codes: [0, 7, 28]).exit_code).not_to eq(0)
+      end
+
+      it 'trusts client headers' do
+        expect(file('/etc/puppetlabs/puppetserver/conf.d/auth.conf').content).to match(%r{allow-header-cert-info\s*[:=]\s*true})
+        expect(file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf').content).to match(%r{^    port: 8141$})
+        expect(file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf').content).not_to match(%r{ssl-port})
+      end
+    end
+
+    describe 'behind nginx' do
+      before(:all) do
+        certname = shell('/opt/puppetlabs/bin/puppet config print certname').stdout.strip
+        paths = shell('/opt/puppetlabs/bin/puppet config print hostcert hostprivkey cadir --section server').stdout
+        hostcert = paths[%r{^hostcert = (.*)$}, 1]
+        hostprivkey = paths[%r{^hostprivkey = (.*)$}, 1]
+        cadir = paths[%r{^cadir = (.*)$}, 1]
+        shell('/opt/puppetlabs/bin/puppet resource package nginx ensure=installed')
+        shell('command -v getenforce >/dev/null && getenforce | grep -q Enforcing && setenforce 0; true')
+        create_remote_file(default, '/etc/nginx/conf.d/openvoxserver-tls-termination.conf', <<~NGINX)
+          upstream openvoxserver {
+              server 127.0.0.1:8141;
+          }
+
+          server {
+              listen 8140 ssl;
+              server_name #{certname};
+
+              ssl_certificate        #{hostcert};
+              ssl_certificate_key    #{hostprivkey};
+              ssl_client_certificate #{cadir}/ca_crt.pem;
+              ssl_crl                #{cadir}/ca_crl.pem;
+              ssl_verify_client      optional;
+
+              client_max_body_size 50m;
+
+              location / {
+                  proxy_pass http://openvoxserver;
+                  proxy_read_timeout 300s;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Client-Verify $ssl_client_verify;
+                  proxy_set_header X-Client-DN     $ssl_client_s_dn;
+                  proxy_set_header X-Client-Cert   $ssl_client_escaped_cert;
+              }
+          }
+        NGINX
+        shell('chmod 0644 /etc/nginx/conf.d/openvoxserver-tls-termination.conf && nginx -t')
+        # Debian and Ubuntu start nginx at install, so a plain ensure=running
+        # would keep the old configuration loaded.
+        shell('/opt/puppetlabs/bin/puppet resource service nginx ensure=stopped')
+        shell('/opt/puppetlabs/bin/puppet resource service nginx ensure=running')
+        shell('for i in $(seq 30); do curl -sfk -o /dev/null https://127.0.0.1:8140/status/v1/simple && break; sleep 2; done')
+        # The notify proves the server saw the agent's certificate.
+        shell('mkdir -p /etc/puppetlabs/code/environments/production/manifests && chmod 0755 /etc/puppetlabs/code/environments/production/manifests')
+        create_remote_file(default, '/etc/puppetlabs/code/environments/production/manifests/site.pp', <<~PUPPET)
+          notify { "tls-termination certname=${trusted['certname']} authenticated=${trusted['authenticated']}": }
+        PUPPET
+        shell('chmod 0644 /etc/puppetlabs/code/environments/production/manifests/site.pp')
+        shell('rm -rf /tmp/tls-bootstrap')
+      end
+
+      after(:all) do
+        shell('/opt/puppetlabs/bin/puppetserver ca clean --certname tls-termination-bootstrap.test', acceptable_exit_codes: [0, 1, 2])
+        shell('rm -rf /tmp/tls-bootstrap /etc/puppetlabs/code/environments/production/manifests/site.pp')
+        shell('/opt/puppetlabs/bin/puppet resource service nginx ensure=stopped enable=false')
+        shell('rm -f /etc/nginx/conf.d/openvoxserver-tls-termination.conf')
+        # Back to the server terminating TLS itself on 8140.
+        apply_manifest("class { 'openvox_server': }", catch_failures: true)
+      end
+
+      it 'serves the agent on the host a catalog, seen as authenticated' do
+        result = shell("/opt/puppetlabs/bin/puppet agent --test --server #{certname}", acceptable_exit_codes: [0, 2])
+        expect(result.stdout).to match(%r{tls-termination certname=#{Regexp.escape(certname)} authenticated=remote})
+      end
+
+      it 'lets a new node bootstrap its certificate through the proxy and get a catalog' do
+        # autosign is on from the earlier context, so the request is signed on arrival.
+        result = shell(bootstrap_agent, acceptable_exit_codes: [0, 2])
+        expect(result.stdout).to match(%r{tls-termination certname=#{Regexp.escape(bootstrap_certname)} authenticated=remote})
+      end
+
+      it 'serves the CA CLI through the proxy' do
+        expect(shell('/opt/puppetlabs/bin/puppetserver ca list --all').stdout).to match(%r{#{Regexp.escape(bootstrap_certname)}})
+      end
+
+      it 'overwrites forged client headers at the proxy but honours them on the server port' do
+        forged = "-H 'X-Client-Verify: SUCCESS' -H 'X-Client-DN: CN=#{bootstrap_certname}'"
+        catalog = "/puppet/v3/catalog/#{bootstrap_certname}?environment=production"
+        expect(shell("curl -sk -o /dev/null -w '%{http_code}' #{forged} https://#{certname}:8140#{catalog}").stdout.strip).to eq('403')
+        expect(shell("curl -s -o /dev/null -w '%{http_code}' #{forged} http://127.0.0.1:8141#{catalog}").stdout.strip).to eq('200')
+      end
+
+      it 'rejects a revoked certificate once nginx reloads the CRL' do
+        shell("/opt/puppetlabs/bin/puppetserver ca revoke --certname #{bootstrap_certname}")
+        shell('nginx -s reload')
+        result = shell(bootstrap_agent, acceptable_exit_codes: [1])
+        expect(result.stdout + result.stderr).to match(%r{400})
+      end
+    end
+  end
 end
