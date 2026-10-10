@@ -343,6 +343,65 @@ describe 'openvox_server' do
         it { is_expected.to compile.and_raise_error(%r{ca_name}) }
       end
 
+      # node is one let too many for the cop; it is what sets trusted.certname.
+      context 'as a compiler' do # rubocop:disable RSpec/MultipleMemoizedHelpers
+        let(:node) { 'compiler.example.com' }
+        let(:params) { { ca: false, ca_server: 'puppet.example.com' } }
+
+        it { is_expected.to compile.with_all_deps }
+        it { is_expected.not_to contain_exec('openvox_server ca setup') }
+
+        it do
+          is_expected.to contain_file('/etc/puppetlabs/puppetserver/services.d/ca.cfg')
+            .with_content(%r{^puppetlabs.services.ca.certificate-authority-disabled-service/certificate-authority-disabled-service$})
+            .without_content(%r{^puppetlabs.services.ca.certificate-authority-service})
+            .that_notifies('Service[puppetserver]')
+        end
+
+        it do
+          is_expected.to contain_file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf')
+            .with_content(%r{^    ssl-host: 0.0.0.0$})
+            .with_content(%r{^    ssl-cert: /etc/puppetlabs/puppet/ssl/certs/compiler.example.com.pem$})
+            .with_content(%r{^    ssl-key: /etc/puppetlabs/puppet/ssl/private_keys/compiler.example.com.pem$})
+            .with_content(%r{^    ssl-ca-cert: /etc/puppetlabs/puppet/ssl/certs/ca.pem$})
+            .with_content(%r{^    ssl-crl-path: /etc/puppetlabs/puppet/ssl/crl.pem$})
+        end
+
+        it { is_expected.to contain_ini_setting('openvox_server puppet.conf main ca_server').with_section('main').with_value('puppet.example.com') }
+
+        it do
+          is_expected.to contain_file('/etc/puppetlabs/puppet/ssl/private_keys/compiler.example.com.pem')
+            .with_owner('puppet').with_group('puppet').with_mode('0640')
+            .that_requires('Package[openvox-server]')
+            .that_comes_before('Service[puppetserver]')
+        end
+
+        it { is_expected.to contain_file('/etc/puppetlabs/puppet/ssl/private_keys').with_owner('puppet') }
+        it { is_expected.to contain_file('/etc/puppetlabs/puppet/ssl/certs/ca.pem').with_owner('puppet').with_mode('0644') }
+      end
+
+      context 'as a compiler behind a TLS-terminating proxy' do
+        let(:params) { { ca: false, ca_server: 'puppet.example.com', tls_termination: true } }
+
+        it { is_expected.to compile.with_all_deps }
+        it { is_expected.to contain_file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf').without_content(%r{ssl-}).with_content(%r{^    port: 8141$}) }
+        it { is_expected.to contain_file('/etc/puppetlabs/puppet/ssl/private_keys').with_owner('puppet') }
+      end
+
+      context 'as a compiler without ca_server' do
+        let(:params) { { ca: false } }
+
+        it { is_expected.to compile.and_raise_error(%r{needs ca_server}) }
+      end
+
+      context 'as a compiler on a host with a CA of its own' do
+        let(:server_state) { super().merge('server_package' => 'openvox-server', 'version' => '8.17.0-1.el9', 'collection' => 'openvox8', 'ca_crt_present' => true) }
+        let(:agent_state) { super().merge('server_packages' => ['openvox-server']) }
+        let(:params) { { ca: false, ca_server: 'puppet.example.com' } }
+
+        it { is_expected.to compile.and_raise_error(%r{has a CA of its own}) }
+      end
+
       context 'with manage_ca false' do
         let(:params) { { manage_ca: false } }
 
@@ -350,6 +409,14 @@ describe 'openvox_server' do
         it { is_expected.not_to contain_class('openvox_server::ca') }
         it { is_expected.not_to contain_exec('openvox_server ca setup') }
         it { is_expected.not_to contain_file('/etc/puppetlabs/puppetserver/services.d/ca.cfg') }
+      end
+
+      context 'with manage_ca false and ca false' do
+        let(:params) { { manage_ca: false, ca: false } }
+
+        it { is_expected.to compile.with_all_deps }
+        it { is_expected.not_to contain_file('/etc/puppetlabs/puppet/ssl/private_keys') }
+        it { is_expected.to contain_file('/etc/puppetlabs/puppetserver/conf.d/webserver.conf').without_content(%r{ssl-cert}) }
       end
 
       context 'with renewal settings' do
@@ -404,7 +471,7 @@ describe 'openvox_server' do
         end
 
         it { is_expected.to contain_ini_setting('openvox_server puppet.conf server autosign').with_section('server').with_value('true') }
-        it { is_expected.to contain_ini_setting('openvox_server puppet.conf server ca_server').with_section('server').with_value('ca.example.com') }
+        it { is_expected.to contain_ini_setting('openvox_server puppet.conf main ca_server').with_section('main').with_value('ca.example.com') }
         it { is_expected.to contain_class('openvox_server::config').that_comes_before('Class[openvox_server::ca]') }
       end
 

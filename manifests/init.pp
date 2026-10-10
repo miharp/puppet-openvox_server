@@ -33,7 +33,9 @@
 #    service ever starts, when no CA exists yet, runs `puppetserver ca setup`
 #    so the CA is a root plus a 15-year intermediate rather than the single
 #    self-signed certificate the service makes for itself on first start
-#    (`manage_ca`).
+#    (`manage_ca`). With `ca => false` the host is a compiler: the CA
+#    service is disabled, the server presents the certificate its own agent
+#    holds from the CA, and `ca_server` names the CA.
 # 6. Applies the JVM heap, reserved code cache and JRuby instance count it
 #    is given, through [openvox_tune](https://forge.puppet.com/modules/miharp/openvox_tune),
 #    whose `openvox_tune::tune` plan recommends them for the host. On a host
@@ -70,6 +72,12 @@
 #     max_active_instances   => 7,
 #     heap_mb                => 4096,
 #     reserved_code_cache_mb => 1024,
+#   }
+#
+# @example A compiler, whose agent already holds a certificate from the CA
+#   class { 'openvox_server':
+#     ca        => false,
+#     ca_server => 'puppet.example.com',
 #   }
 #
 # @example Behind a reverse proxy that terminates TLS on this host
@@ -190,9 +198,17 @@
 #   `JAVA_ARGS`. Unset, left as it is.
 #
 # @param manage_ca
-#   Whether to keep the CA service enabled in `services.d/ca.cfg` and to set
-#   the CA up with `puppetserver ca setup` before the first start. An existing
-#   CA is never touched.
+#   Whether to manage `services.d/ca.cfg` and the CA at all. Off, `ca` does
+#   nothing and an existing CA is never touched.
+#
+# @param ca
+#   Whether this server is the certificate authority. On (the default), the
+#   CA service is enabled and set up before the first start. Off, the host
+#   is a compiler: the CA service is disabled, the server presents the
+#   certificate, key, CA bundle and CRL its own agent holds from the CA, and
+#   `ca_server` is required. The agent must have its certificate before this
+#   class runs, so there is nothing to bootstrap. A CA that this host has
+#   already made for itself stops the class rather than being removed.
 #
 # @param ca_name
 #   The common name of the intermediate signing certificate `puppetserver ca
@@ -224,8 +240,10 @@
 #   unset, left as it is.
 #
 # @param ca_server
-#   `ca_server` in `[server]`: the CA this server sends certificate requests
-#   to, for a compiler. When unset, left as it is.
+#   `ca_server` in the `[main]` section of `puppet.conf`: the CA every
+#   Puppet process on this host sends certificate requests to, so that a
+#   compiler's agent renews its certificate and fetches the CRL from the CA.
+#   Required with `ca => false`. When unset, left as it is.
 #
 # @param manage_service
 #   Whether to manage the server service.
@@ -263,6 +281,7 @@ class openvox_server (
   Optional[Integer[512]]              $heap_mb               = undef,
   Optional[Integer[32]]               $reserved_code_cache_mb = undef,
   Boolean                             $manage_ca             = true,
+  Boolean                             $ca                    = true,
   Optional[Pattern[/\A[^'"]+\z/]]     $ca_name               = undef,
   Optional[Array[String[1]]]          $subject_alt_names     = undef,
   Optional[Boolean]                   $allow_auto_renewal    = undef,
@@ -294,6 +313,10 @@ class openvox_server (
   $clashing = $webserver_extra_settings.keys.filter |$setting| { $setting in $owned_webserver_settings }
   unless $clashing.empty {
     fail("openvox_server: webserver_extra_settings cannot set ${clashing.join(', ')}; use the parameters for them.")
+  }
+
+  if $manage_ca and !$ca and $ca_server =~ Undef {
+    fail('openvox_server: a compiler (ca => false) needs ca_server, the CA its agent gets certificates from.')
   }
 
   # With allow-header-cert-info the server believes whatever X-Client-*

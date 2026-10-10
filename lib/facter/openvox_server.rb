@@ -19,6 +19,8 @@
 # - heap_mb: the maximum heap from -Xmx in JAVA_ARGS of the defaults file;
 #   nil without an -Xmx
 # - ca_enabled: whether services.d/ca.cfg enables the CA service
+# - ca_crt_present: whether the CA directory holds a ca_crt.pem, a CA this
+#   host made or was given
 # - tls_termination: whether auth.conf sets allow-header-cert-info
 Facter.add(:openvox_server) do
   confine kernel: 'Linux'
@@ -126,6 +128,8 @@ Facter.add(:openvox_server) do
       ca_enabled = active.any? { |line| line.end_with?('/certificate-authority-service') }
     end
 
+    ca_crt_present = File.exist?("#{conf_dir}/ca/ca_crt.pem")
+
     auth_conf = "#{conf_dir}/conf.d/auth.conf"
     tls_termination = nil
     if File.readable?(auth_conf)
@@ -145,6 +149,7 @@ Facter.add(:openvox_server) do
       'defaults_file' => defaults_file,
       'heap_mb' => heap_mb,
       'ca_enabled' => ca_enabled,
+      'ca_crt_present' => ca_crt_present,
       'tls_termination' => tls_termination,
     }.compact
   end

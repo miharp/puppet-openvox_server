@@ -191,6 +191,15 @@ describe 'openvox_server' do
     end
   end
 
+  context 'as a compiler on the host that is the CA' do
+    it 'refuses to disable the CA this host made' do
+      result = apply_manifest("class { 'openvox_server': ca => false, ca_server => 'ca.example.com' }", expect_failures: true)
+      expect(result.stderr).to match(%r{has a CA of its own})
+      expect(file('/etc/puppetlabs/puppetserver/ca/ca_crt.pem')).to be_file
+      expect(file('/etc/puppetlabs/puppetserver/services.d/ca.cfg').content).to match(%r{^puppetlabs.services.ca.certificate-authority-service/certificate-authority-service$})
+    end
+  end
+
   context 'with TLS termination behind nginx' do
     # Ported from openvox-server's acceptance test for TLS termination: nginx
     # on 8140 verifies agent certificates and passes them to the server,

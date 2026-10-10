@@ -79,13 +79,19 @@ Numbered so acceptance tests and the README can cite them.
   `ca_name`, `subject_alt_names`.
 - **R8** `ca => false` (compiler): disable the CA service in `ca.cfg`, point
   `webserver.conf` at the agent's own certificate, key, CA bundle and CRL
-  (ovadm `configure_compiler_ssl.sh`), set `ca_server` in `puppet.conf`, and
-  remove any pre-generated CA directory. The applying agent already holds a
-  certificate from the CA, so there is no bootstrap ordering problem.
+  (ovadm `configure_compiler_ssl.sh`), made readable to the puppet user
+  since the agent wrote them as root before that user existed, and set
+  `ca_server` in the `[main]` section of `puppet.conf` (an agent setting,
+  so it also moves there for R10). A pre-generated CA directory is not
+  removed: a `ca_crt.pem` there stops the class with a message, since
+  removing a CA that may have signed agents is never a routine run (ovadm
+  removes it; a Puppet class must not). The applying agent already holds a
+  certificate from the CA, so there is no bootstrap ordering problem. Done
+  in M5 (2026-10-10).
 - **R9** `ca.conf`: `allow_auto_renewal` and `auto_renewal_cert_ttl`
   (ovadm `configure_ca_renewal.sh`).
-- **R10** `puppet.conf` `[server]`: `dns_alt_names`, `autosign` (boolean,
-  or a path), `ca_server`. Nothing else in v1.
+- **R10** `puppet.conf`: `dns_alt_names` and `autosign` (boolean, or a
+  path) in `[server]`, `ca_server` in `[main]` (see R8). Nothing else in v1.
 
 ### Server configuration
 
