@@ -18,7 +18,8 @@ Notable changes to openvox_server are recorded here. The format follows
   applying agent's on a fresh host. `java_package` installs a JRE first for
   pre-release testing. Warnings, not failures, for a held package, for a host
   with less memory than 1.1 times the server's heap, and for a server whose
-  service runs a Java it does not support.
+  service runs a Java it does not support. A clear failure for `openvox9` on
+  Debian 12, where no OpenVox Server 9 package exists.
 - The `openvox_server` fact: server package and version, collection, agent
   package, release packages, held packages, the Java the service runs, the
   defaults file and its heap, and whether the CA service and TLS termination

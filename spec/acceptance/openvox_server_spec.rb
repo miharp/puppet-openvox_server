@@ -9,6 +9,12 @@ describe 'openvox_server' do
   let(:certname) { shell('/opt/puppetlabs/bin/puppet config print certname').stdout.strip }
 
   before(:all) do
+    # OpenVox Server 9 is not packaged for Debian 12 (no Java 21 there), and
+    # the class says so instead of installing.
+    os = shell('/opt/puppetlabs/bin/facter os.name os.release.major').stdout
+    debian12 = os.include?('Debian') && os.match?(%r{=> "?12"?})
+    skip 'OpenVox Server 9 is not packaged for Debian 12' if debian12 && ENV.fetch('BEAKER_PUPPET_COLLECTION', 'openvox9') >= 'openvox9'
+
     # The server's certificate names the host's certname; the agent on the
     # host reaches its server by that name.
     certname = shell('/opt/puppetlabs/bin/puppet config print certname').stdout.strip

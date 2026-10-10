@@ -24,6 +24,8 @@
 #
 # A host running neither openvox-server nor openvox-agent, such as a Puppet 7
 # server, has no collection to default to and takes an explicit `collection`.
+# OpenVox Server 9 is not packaged for Debian 12, which lacks the Java 21 it
+# needs; a Debian 12 host stays on `openvox8`.
 #
 # @example Standard install from the agent's collection
 #   include openvox_server
@@ -124,6 +126,16 @@ class openvox_server (
     fail(@("MSG"/L))
       openvox_server: ${trusted['certname']} runs neither openvox-server nor openvox-agent, \
       so there is no collection to install from; set collection (such as openvox9).
+      | MSG
+  }
+
+  # Debian 12 ships no Java 21, so no OpenVox Server 9 package is built for
+  # it; apt would only say the package cannot be located.
+  if $facts['os']['name'] == 'Debian' and $facts['os']['release']['major'] == '12'
+  and Integer($resolved_collection.regsubst(/\Aopenvox/, '')) >= 9 {
+    fail(@("MSG"/L))
+      openvox_server: OpenVox Server 9 is not packaged for Debian 12 (it needs Java 21, which \
+      Debian 12 does not ship); keep ${trusted['certname']} on openvox8 or move it to Debian 13.
       | MSG
   }
 

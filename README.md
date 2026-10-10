@@ -120,6 +120,9 @@ The module ships one structured fact, `openvox_server`:
 
 - Linux only: Debian 12 and 13, Ubuntu 22.04 and 24.04, and EL 8, 9 and 10
   (RHEL, AlmaLinux, Rocky, Oracle Linux).
+- OpenVox Server 9 is not packaged for Debian 12, which does not ship the
+  Java 21 it needs. A Debian 12 host stays on `openvox8`; the class refuses
+  `openvox9` there with a message saying so.
 - Requires OpenVox 8 or 9 on the server compiling the catalog, which is the
   host it manages.
 

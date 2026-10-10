@@ -48,6 +48,8 @@ OpenVox Server 8 needs Java 17 or 21, OpenVox Server 9 needs 21 or 25.
 
 A host running neither openvox-server nor openvox-agent, such as a Puppet 7
 server, has no collection to default to and takes an explicit `collection`.
+OpenVox Server 9 is not packaged for Debian 12, which lacks the Java 21 it
+needs; a Debian 12 host stays on `openvox8`.
 
 #### Examples
 
