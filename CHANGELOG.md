@@ -6,6 +6,8 @@ Notable changes to openvox_server are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-11
+
 ### Fixed
 
 - `webserver.conf` and `services.d/ca.cfg` are written exactly as the
@@ -66,5 +68,6 @@ Notable changes to openvox_server are recorded here. The format follows
   and 9. OpenVox Server 9 is not packaged for Debian 12, and the class says
   so.
 
-[Unreleased]: https://github.com/miharp/puppet-openvox_server/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/miharp/puppet-openvox_server/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/miharp/puppet-openvox_server/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/miharp/puppet-openvox_server/releases/tag/v0.1.0
