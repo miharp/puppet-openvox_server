@@ -6,6 +6,14 @@ Notable changes to openvox_server are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `webserver.conf` and `services.d/ca.cfg` are written exactly as the
+  package ships them (no header, the shipped comments kept, the two CA
+  service lines swapped for a compiler the way ovadm leaves them), so the
+  class takes over a stock server, or one ovadm installed, without
+  rewriting either file and restarting the service once.
+
 ## [0.1.0] - 2026-10-11
 
 ### Added

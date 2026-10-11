@@ -69,6 +69,8 @@ class openvox_server::config {
     }
   }
 
+  # Written in the package's own layout and key order, without a header,
+  # so taking over a stock server changes nothing.
   if $openvox_server::manage_webserver {
     file { "${confdir}/conf.d/webserver.conf":
       ensure  => file,
