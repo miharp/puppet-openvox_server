@@ -12,7 +12,11 @@ TLS termination behind a reverse proxy, compiler mode, and the
 [openvox_agent](https://forge.puppet.com/modules/miharp/openvox_agent).
 
 Assign the class to the host that runs your server. The agent on that host
-applies it against the server it manages.
+applies it against the server it manages. Install with
+[ovadm](https://forge.puppet.com/modules/miharp/ovadm) or by hand first;
+the class takes a host over without changing anything that already matches,
+and leaves upgrades across a server and its compilers to `ovadm::upgrade`,
+which can order them.
 
 ```puppet
 include openvox_server
