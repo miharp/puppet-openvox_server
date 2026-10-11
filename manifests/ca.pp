@@ -23,6 +23,9 @@ class openvox_server::ca {
     default => undef,
   }
 
+  # Written the way the package ships it, comments included, with the two
+  # service lines swapped for a compiler the way ovadm's task swaps them:
+  # taking over a stock server, or one ovadm set up, changes nothing.
   file { "${confdir}/services.d/ca.cfg":
     ensure  => file,
     content => epp('openvox_server/ca.cfg.epp', { 'ca_enabled' => $openvox_server::ca }),

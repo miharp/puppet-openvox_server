@@ -8,8 +8,6 @@
       String[1] $access_log_config,
       Hash[String[1], Variant[String, Numeric, Boolean, Array[Variant[String, Numeric, Boolean]]]] $extra_settings,
 | -%>
-# This file is managed by the openvox_server class; local changes are
-# overwritten.
 webserver: {
     access-log-config: <%= $access_log_config %>
 <% if $tls_termination { -%>
