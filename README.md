@@ -41,11 +41,11 @@ include openvox_server
    listens on plain HTTP on `host` and `port` for a reverse proxy instead,
    and `auth.conf` is told to trust the client certificate headers the
    proxy sets.
-4. **Sets the settings it is given** and nothing else: `dns_alt_names`,
-   `autosign` and `ca_server` in the `[server]` section of `puppet.conf`,
-   and `allow-auto-renewal` and `auto-renewal-cert-ttl` in `ca.conf`. A
-   setting left unset is left as it is, and the rest of each file is never
-   touched.
+4. **Sets the settings it is given** and nothing else: `dns_alt_names` and
+   `autosign` in the `[server]` section of `puppet.conf`, `ca_server` in its
+   `[main]` section, and `allow-auto-renewal` and `auto-renewal-cert-ttl` in
+   `ca.conf`. A setting left unset is left as it is, and the rest of each
+   file is never touched.
 5. **Sizes the JVM and the JRuby pool** when told to: `heap_mb`,
    `reserved_code_cache_mb` and `max_active_instances` are applied through
    [openvox_tune](https://forge.puppet.com/modules/miharp/openvox_tune),
@@ -65,8 +65,9 @@ include openvox_server
 7. **Keeps the service running** and enabled. It is restarted when the
    package, `webserver.conf`, `services.d/ca.cfg` or the JVM arguments
    change, and reloaded, which keeps the JVM and takes a few seconds, when
-   `puppet.conf`, `ca.conf` or the instance count changes. Both block until the server serves again, so an agent
-   applying this catalog on the server host still delivers its report.
+   `puppet.conf`, `ca.conf` or the instance count changes. Both block until
+   the server serves again, so an agent applying this catalog on the server
+   host still delivers its report.
 
 Before that it warns, and changes nothing, when a package is held by
 `apt-mark hold` or `versionlock`, when the host has less memory than 1.1
@@ -183,7 +184,33 @@ server when testing a pre-release that needs one the package does not yet
 require.
 
 See [REFERENCE.md](https://github.com/miharp/puppet-openvox_server/blob/main/REFERENCE.md)
-for every parameter.
+for every parameter, and [examples/](examples/) for each of the above as a
+manifest.
+
+## Upgrading
+
+Within a collection, `package_version => 'latest'` moves the server and its
+agent to each new release as the package index learns of it. From OpenVox 8
+to 9, set the collection:
+
+```puppet
+class { 'openvox_server':
+  collection            => 'openvox9',
+  package_version       => 'latest',
+  agent_package_version => 'latest',
+}
+```
+
+The release package is switched, `openvox-server` and `openvox-agent` move
+together in one package transaction, the service restarts on the new
+version, and the run's own report is delivered afterwards. `JAVA_ARGS` and
+`puppet.conf` are kept as they were: the package managers keep an edited
+defaults file, and the server package only resets `puppet.conf` when it
+replaces `puppetserver`, which is the Puppet 7 move and not covered. Read
+the server's upgrade notes before moving a fleet; most of what changes
+between majors is in the language and the agent's defaults, which this
+module does not touch. Debian 12 cannot move: OpenVox Server 9 is not
+packaged for it.
 
 ## What it leaves alone
 
