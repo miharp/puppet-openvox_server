@@ -4,6 +4,9 @@
 [![OpenVox compatible](https://img.shields.io/badge/OpenVox-8%20%7C%209-orange.svg)](https://voxpupuli.org/openvox/)
 [![License](https://img.shields.io/github/license/miharp/puppet-openvox_server)](https://github.com/miharp/puppet-openvox_server/blob/main/LICENSE)
 
+[![Puppet Forge](https://img.shields.io/puppetforge/v/miharp/openvox_server)](https://forge.puppet.com/modules/miharp/openvox_server)
+[![Puppet Forge downloads](https://img.shields.io/puppetforge/dt/miharp/openvox_server)](https://forge.puppet.com/modules/miharp/openvox_server)
+
 Manages OpenVox Server from a Puppet run: the `openvox-server` package and
 the `openvox-agent` it requires, the certificate authority, `webserver.conf`
 and the settings in `puppet.conf` and `ca.conf`, the JVM and JRuby sizing,
@@ -12,7 +15,11 @@ TLS termination behind a reverse proxy, compiler mode, and the
 [openvox_agent](https://forge.puppet.com/modules/miharp/openvox_agent).
 
 Assign the class to the host that runs your server. The agent on that host
-applies it against the server it manages.
+applies it against the server it manages. Install with
+[ovadm](https://forge.puppet.com/modules/miharp/ovadm) or by hand first;
+the class takes a host over without changing anything that already matches,
+and leaves upgrades across a server and its compilers to `ovadm::upgrade`,
+which can order them.
 
 ```puppet
 include openvox_server
