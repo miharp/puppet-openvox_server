@@ -6,6 +6,8 @@ Notable changes to openvox_server are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-11
+
 ### Added
 
 - The `openvox_server` class, which manages an OpenVox Server from a Puppet
@@ -56,4 +58,5 @@ Notable changes to openvox_server are recorded here. The format follows
   and 9. OpenVox Server 9 is not packaged for Debian 12, and the class says
   so.
 
-[Unreleased]: https://github.com/miharp/puppet-openvox_server/commits/main
+[Unreleased]: https://github.com/miharp/puppet-openvox_server/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/miharp/puppet-openvox_server/releases/tag/v0.1.0
